@@ -58,6 +58,9 @@ export global S {
     in-out property <string> ssh-port: "22";
     in-out property <string> ssh-user: "root";
     in-out property <string> ssh-pass;
+    in-out property <bool> ssh-pass-show;
+    in-out property <string> srv-pass;
+    in-out property <bool> srv-pass-show;
     callback ssh-connect();
     callback ssh-disconnect();
     callback ssh-forget();
@@ -65,7 +68,9 @@ export global S {
     callback term-key(string, bool, bool);
     callback term-paste();
     callback term-copy();
-    callback term-resize(length, length);
+    callback term-resize(length, length, length);
+    callback term-sel(length, length, bool);
+    in-out property <bool> drop-hover;
 
     // Dateien
     in-out property <bool> remote-on;
@@ -101,6 +106,8 @@ export global S {
     in-out property <bool> ed-msg-ok;
     in-out property <bool> ed-nginx;
     in-out property <bool> ed-revert;
+    in-out property <string> ed-gutter;
+    callback ed-edited();
     callback ed-save();
     callback ed-close();
     callback ed-undo();
@@ -158,9 +165,11 @@ export global S {
     in-out property <string> mc-name;
     in-out property <string> mc-pill;
     in-out property <string> mc-pill-kind;
-    in-out property <string> mc-motd;
+    in-out property <[TermRun]> mc-motd-runs;
+    in-out property <image> mc-icon;
+    in-out property <bool> mc-has-icon;
+    in-out property <[TermRow]> mc-rows;
     in-out property <string> mc-meta;
-    in-out property <[LineItem]> mc-lines;
     in-out property <string> mc-input;
     in-out property <[string]> mc-players;
     in-out property <string> mc-online;
@@ -228,6 +237,8 @@ export global S {
     in-out property <string> au-search;
     in-out property <bool> au-changes;
     in-out property <string> au-stats;
+    in-out property <[string]> au-servers;
+    in-out property <int> au-server;
     in-out property <bool> ask-open;
     in-out property <string> ask-server;
     in-out property <string> ask-summary;
@@ -255,6 +266,17 @@ export global S {
     in-out property <string> dc-state;
     in-out property <string> dc-large;
     in-out property <string> dc-large-text;
+    in-out property <string> dc-small;
+    in-out property <string> dc-small-text;
+    in-out property <[string]> dc-servers;
+    in-out property <int> dc-server;
+    in-out property <int> dc-type;
+    in-out property <int> dc-timer;
+    in-out property <string> dc-b1l;
+    in-out property <string> dc-b1u;
+    in-out property <string> dc-b2l;
+    in-out property <string> dc-b2u;
+    callback dc-init();
     in-out property <string> dc-pv-details;
     in-out property <string> dc-pv-state;
     callback dc-set-enabled(bool);

@@ -21,6 +21,7 @@ component Stat inherits Card {
 component KvList inherits Card {
     in property <string> title;
     in property <[KV]> rows;
+    in property <bool> show-pass;
     VerticalLayout {
         padding: 16px;
         spacing: 8px;
@@ -34,6 +35,26 @@ component KvList inherits Card {
                 horizontal-stretch: 0;
                 Icon { d: Icons.copy; size: 13px; tint: Theme.dim; }
                 TouchArea { mouse-cursor: pointer; clicked => { S.copy(r.v); } }
+            }
+        }
+        if show-pass: HorizontalLayout {
+            spacing: 12px;
+            Text { text: "SSH-Passwort"; width: 130px; color: Theme.mut; font-size: 13px; vertical-alignment: center; }
+            Text {
+                text: S.srv-pass == "" ? "noch nicht gespeichert" : S.srv-pass-show ? S.srv-pass : "••••••••••••";
+                color: S.srv-pass == "" ? Theme.dim : Theme.fg;
+                font-family: Theme.mono;
+                font-size: 13px;
+                vertical-alignment: center;
+                horizontal-stretch: 1;
+                wrap: word-wrap;
+            }
+            if S.srv-pass != "": Button { text: S.srv-pass-show ? "Verbergen" : "Zeigen"; small: true; clicked => { S.srv-pass-show = !S.srv-pass-show; } }
+            if S.srv-pass != "": Rectangle {
+                width: 22px;
+                horizontal-stretch: 0;
+                Icon { d: Icons.copy; size: 13px; tint: Theme.dim; }
+                TouchArea { mouse-cursor: pointer; clicked => { S.copy(S.srv-pass); } }
             }
         }
         Rectangle { }
@@ -53,7 +74,7 @@ component Overview inherits ScrollView {
         HorizontalLayout {
             spacing: 14px;
             KvList { title: "KONFIGURATION"; rows: S.cfg; }
-            KvList { title: "NETZWERK & ZUGANG"; rows: S.net; }
+            KvList { title: "NETZWERK & ZUGANG"; rows: S.net; show-pass: true; }
         }
         KvList { title: "HOSTSYSTEM"; rows: S.host; }
     }
@@ -67,8 +88,15 @@ component Terminal inherits Rectangle {
     border-width: 1px;
     border-color: fs.has-focus ? Theme.acc : Theme.line;
     clip: true;
-    changed width => { S.term-resize(self.width, self.height); }
-    changed height => { S.term-resize(self.width, self.height); }
+    // Zeichenbreite messen, damit Spalten und Auswahl zur Schrift passen
+    probe := Text { visible: false; text: "MMMMMMMMMMMMMMMMMMMM"; font-family: Theme.mono; font-size: 13px; }
+    changed width => { S.term-resize(self.width, self.height, probe.preferred-width / 20); }
+    changed height => { S.term-resize(self.width, self.height, probe.preferred-width / 20); }
+    // Beim ersten Anzeigen ändert sich die Größe nicht, also einmal von Hand melden
+    Timer {
+        interval: 50ms;
+        triggered => { self.running = false; S.term-resize(root.width, root.height, probe.preferred-width / 20); }
+    }
     fs := FocusScope {
         key-pressed(e) => {
             if (e.modifiers.control && e.modifiers.shift && (e.text == "c" || e.text == "C")) { S.term-copy(); return accept; }
@@ -76,7 +104,13 @@ component Terminal inherits Rectangle {
             S.term-key(e.text, e.modifiers.control, e.modifiers.alt);
             accept
         }
-        TouchArea { clicked => { fs.focus(); } }
+        ta := TouchArea {
+            mouse-cursor: text;
+            pointer-event(e) => {
+                if (e.kind == PointerEventKind.down && e.button == PointerEventButton.left) { fs.focus(); S.term-sel(self.mouse-x, self.mouse-y, true); }
+            }
+            moved => { if (self.pressed) { S.term-sel(self.mouse-x, self.mouse-y, false); } }
+        }
         VerticalLayout {
             padding: 10px;
             alignment: start;
@@ -124,7 +158,8 @@ component ConsoleTab inherits VerticalLayout {
                 Field { text <=> S.ssh-host; placeholder: "Host / IP"; mono: true; }
                 Field { text <=> S.ssh-port; placeholder: "Port"; mono: true; width: 80px; }
                 Field { text <=> S.ssh-user; placeholder: "Benutzer"; mono: true; }
-                Field { text <=> S.ssh-pass; placeholder: "Passwort"; password: true; mono: true; }
+                Field { text <=> S.ssh-pass; placeholder: "Passwort"; password: !S.ssh-pass-show; mono: true; }
+                Button { text: S.ssh-pass-show ? "Verbergen" : "Zeigen"; clicked => { S.ssh-pass-show = !S.ssh-pass-show; } }
             }
             HorizontalLayout {
                 spacing: 8px;
@@ -418,6 +453,37 @@ component BackupsTab inherits VerticalLayout {
 }
 
 // ---------- API-Konsole ----------
+
+// Zeilen mit formatierten Abschnitten (Minecraft-Farben)
+export component RowLog inherits Rectangle {
+    in property <[TermRow]> rows;
+    background: #07080c;
+    border-radius: 12px;
+    border-width: 1px;
+    border-color: Theme.line;
+    clip: true;
+    ScrollView {
+        content-y: min(0px, self.height - col2.preferred-height - 16px);
+        content-height: max(self.height, col2.preferred-height + 16px);
+        col2 := VerticalLayout {
+            x: 12px;
+            y: 8px;
+            width: parent.width - 24px;
+            alignment: start;
+            for row in rows: HorizontalLayout {
+                height: 17px;
+                alignment: start;
+                for run in row.runs: Text {
+                    text: run.text;
+                    color: run.fg;
+                    font-family: Theme.mono;
+                    font-size: 12.5px;
+                    font-weight: run.bold ? 700 : 400;
+                }
+            }
+        }
+    }
+}
 
 export component LineLog inherits Rectangle {
     in property <[LineItem]> lines;

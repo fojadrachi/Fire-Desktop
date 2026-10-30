@@ -177,6 +177,8 @@ fn render_server(s: &S<'_>) {
     let Some(srv) = store::server(&a.active) else { return };
     s.set_srv_name(ss(&srv.name));
     let cfg = a.cfg.clone().unwrap_or_default();
+    // Die 24fire-API liefert das Passwort nicht; dann das zuletzt funktionierende anzeigen
+    s.set_srv_pass(ss(if cfg.password.is_empty() { srv.saved_ssh().unwrap_or_default() } else { cfg.password.clone() }));
     match a.status.get(&a.active) {
         None => { s.set_srv_pill("Lädt…".into()); s.set_srv_pill_kind("".into()); }
         Some(Err(e)) => {
@@ -269,6 +271,8 @@ fn select_server(id: String) {
         s.set_active_id(ss(id));
         s.set_remote_on(false);
         s.set_remote_error("".into());
+        s.set_srv_pass_show(false);
+        s.set_ssh_pass_show(false);
         s.set_files(model(vec![]));
         s.set_term(model(vec![]));
         s.set_srv_task("".into());
@@ -298,6 +302,20 @@ enum TermMsg { Input(Vec<u8>), Resize(u32, u32), Close }
 static TERM_TX: Mutex<Option<mpsc::UnboundedSender<TermMsg>>> = Mutex::new(None);
 static PARSER: Mutex<Option<vt100::Parser>> = Mutex::new(None);
 static TERM_SIZE: Mutex<(u16, u16)> = Mutex::new((32, 120));
+static SEL: Mutex<Option<((u16, u16), (u16, u16))>> = Mutex::new(None);
+static CELL_W: Mutex<f32> = Mutex::new(7.6);
+
+/// Auswahl von oben links nach unten rechts sortiert.
+fn sel_range() -> Option<((u16, u16), (u16, u16))> {
+    let (a, b) = (*SEL.lock().unwrap())?;
+    if a == b { return None; }
+    Some(if a <= b { (a, b) } else { (b, a) })
+}
+
+fn sel_text() -> Option<String> {
+    let ((r1, c1), (r2, c2)) = sel_range()?;
+    PARSER.lock().unwrap().as_ref().map(|p| p.screen().contents_between(r1, c1, r2, c2 + 1))
+}
 
 fn term_stop() {
     if let Some(tx) = TERM_TX.lock().unwrap().take() { let _ = tx.send(TermMsg::Close); }
@@ -324,6 +342,7 @@ fn term_rows(p: &vt100::Parser) -> Vec<(Vec<(String, Color, Color, bool)>,)> {
     let (rows, cols) = sc.size();
     let (cur_r, cur_c) = sc.cursor_position();
     let (fg0, bg0) = (Color::from_rgb_u8(232, 235, 242), Color::from_argb_u8(0, 0, 0, 0));
+    let sel = sel_range();
     (0..rows).map(|r| {
         let mut runs: Vec<(String, Color, Color, bool)> = Vec::new();
         for c in 0..cols {
@@ -332,6 +351,7 @@ fn term_rows(p: &vt100::Parser) -> Vec<(Vec<(String, Color, Color, bool)>,)> {
             let mut fg = vt_color(cell.fgcolor(), fg0);
             let mut bg = vt_color(cell.bgcolor(), bg0);
             if cell.inverse() { std::mem::swap(&mut fg, &mut bg); if bg == bg0 { bg = fg0; } if fg == bg0 { fg = Color::from_rgb_u8(7, 8, 12); } }
+            if sel.is_some_and(|(a, b)| (r, c) >= a && (r, c) <= b) { bg = Color::from_rgb_u8(150, 62, 26); }
             if r == cur_r && c == cur_c && !sc.hide_cursor() { fg = Color::from_rgb_u8(7, 8, 12); bg = Color::from_rgb_u8(255, 106, 43); }
             let t = cell.contents();
             let t = if t.is_empty() { " " } else { t.as_str() };
@@ -470,6 +490,69 @@ fn selected_paths(name: &str) -> Vec<String> {
     if name.is_empty() { a.selected.iter().map(|n| ssh::join(&a.cwd, n)).collect() } else { vec![ssh::join(&a.cwd, name)] }
 }
 
+// ---------- Drag & Drop ----------
+
+static DROPPED: Mutex<Vec<PathBuf>> = Mutex::new(Vec::new());
+
+/// Windows meldet jede Datei einzeln; kurz sammeln und dann gemeinsam hochladen.
+fn on_drop(path: PathBuf) {
+    let first = { let mut g = DROPPED.lock().unwrap(); g.push(path); g.len() == 1 };
+    if !first { return; }
+    spawn(async {
+        tokio::time::sleep(Duration::from_millis(200)).await;
+        let paths = std::mem::take(&mut *DROPPED.lock().unwrap());
+        start_upload(paths).await;
+    });
+}
+
+async fn start_upload(paths: Vec<PathBuf>) {
+    if paths.is_empty() { return; }
+    let r = match ensure_remote().await { Ok(r) => r, Err(e) => return toast(e.to_string(), "err") };
+    if st().cwd.is_empty() { load_files(None).await; }
+    let dir = st().cwd.clone();
+    let name = paths[0].file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+    let (id, job) = transfer_start(true, if paths.len() == 1 { format!("{name} → {dir}") } else { format!("{} Elemente → {dir}", paths.len()) });
+    let res = ssh::upload(r.sftp.clone(), paths, dir, job).await;
+    transfer_end(&id, res);
+    load_files(None).await;
+}
+
+// ---------- Taskleiste ----------
+
+mod taskbar {
+    use slint::winit_030::{winit::raw_window_handle::{HasWindowHandle, RawWindowHandle}, WinitWindowAccessor};
+    use std::cell::RefCell;
+    use windows::Win32::Foundation::HWND;
+    use windows::Win32::System::Com::{CoCreateInstance, CLSCTX_INPROC_SERVER};
+    use windows::Win32::UI::Shell::{ITaskbarList3, TaskbarList, TBPF_NOPROGRESS, TBPF_NORMAL};
+
+    thread_local! { static LIST: RefCell<Option<ITaskbarList3>> = const { RefCell::new(None) }; }
+
+    /// `part` None blendet den Fortschritt aus. Läuft im UI-Thread.
+    pub fn set(window: &slint::Window, part: Option<f32>) {
+        let Some(Some(hwnd)) = window.with_winit_window(|w| match w.window_handle().ok()?.as_raw() {
+            RawWindowHandle::Win32(h) => Some(HWND(h.hwnd.get() as *mut _)),
+            _ => None,
+        }) else { return };
+        LIST.with(|l| unsafe {
+            let mut g = l.borrow_mut();
+            if g.is_none() {
+                if let Ok(t) = CoCreateInstance::<_, ITaskbarList3>(&TaskbarList, None, CLSCTX_INPROC_SERVER) {
+                    if t.HrInit().is_ok() { *g = Some(t); }
+                }
+            }
+            let Some(t) = g.as_ref() else { return };
+            match part {
+                Some(p) => {
+                    let _ = t.SetProgressState(hwnd, TBPF_NORMAL);
+                    let _ = t.SetProgressValue(hwnd, (p.clamp(0.0, 1.0) * 1000.0) as u64, 1000);
+                }
+                None => { let _ = t.SetProgressState(hwnd, TBPF_NOPROGRESS); }
+            }
+        });
+    }
+}
+
 // ---------- Übertragungen ----------
 
 struct Transfer {
@@ -525,7 +608,15 @@ fn transfers_tick() {
             },
         }
     }).collect();
-    ui(move |_, s| s.set_transfers(model(rows)));
+    let running: Vec<(u64, u64)> = g.iter().filter(|t| t.end.is_none()).map(|t| (t.job.done.load(Ordering::Relaxed), t.job.total.load(Ordering::Relaxed))).collect();
+    let part = if running.is_empty() { None } else {
+        let (d, t) = running.iter().fold((0, 0), |a, b| (a.0 + b.0, a.1 + b.1));
+        Some(if t > 0 { d as f32 / t as f32 } else { 0.0 })
+    };
+    ui(move |app, s| {
+        s.set_transfers(model(rows));
+        taskbar::set(app.window(), part);
+    });
 }
 
 // ---------- Editor ----------
@@ -542,12 +633,17 @@ async fn edit_file(path: String, nginx: bool) {
     { let mut a = st(); a.ed_original = text.clone(); a.ed_previous = None; }
     ui(move |_, s| {
         s.set_ed_path(ss(path));
+        s.set_ed_gutter(ss(gutter(&text)));
         s.set_ed_text(ss(text));
         s.set_ed_msg("".into());
         s.set_ed_nginx(nginx);
         s.set_ed_revert(false);
         s.set_ed_open(true);
     });
+}
+
+fn gutter(text: &str) -> String {
+    (1..=text.split('\n').count()).map(|n| n.to_string()).collect::<Vec<_>>().join("\n")
 }
 
 async fn test_and_reload(r: &Remote) -> (bool, String) {
@@ -779,6 +875,17 @@ fn side_mcs(s: &S<'_>) {
     }).collect()));
 }
 
+fn runs(row: Vec<(String, (u8, u8, u8), bool)>) -> ModelRc<TermRun> {
+    let bg = Color::from_argb_u8(0, 0, 0, 0);
+    model(row.into_iter().map(|(t, (r, g, b), bold)| TermRun { text: ss(t), fg: Color::from_rgb_u8(r, g, b), bg, bold }).collect())
+}
+
+fn mc_icon(bytes: &[u8]) -> Option<slint::Image> {
+    let img = image::load_from_memory(bytes).ok()?.to_rgba8();
+    let buf = slint::SharedPixelBuffer::<slint::Rgba8Pixel>::clone_from_slice(img.as_raw(), img.width(), img.height());
+    Some(slint::Image::from_rgba8(buf))
+}
+
 fn render_mc(s: &S<'_>) {
     let id = s.get_active_mc().to_string();
     let Some(m) = mc_get(&id) else { return };
@@ -789,10 +896,21 @@ fn render_mc(s: &S<'_>) {
         Some(Ok(p)) => {
             s.set_mc_pill(ss(format!("Online · {}/{} Spieler", p.online, p.max)));
             s.set_mc_pill_kind("good".into());
-            s.set_mc_motd(ss(mc::strip(&p.motd)));
+            let row: Vec<_> = mc::styled(&p.motd.replace('\n', " "), (170, 170, 170), 400).into_iter().flatten().collect();
+            s.set_mc_motd_runs(runs(row));
+            match p.favicon.as_deref().and_then(mc_icon) {
+                Some(i) => { s.set_mc_icon(i); s.set_mc_has_icon(true); }
+                None => s.set_mc_has_icon(false),
+            }
             s.set_mc_meta(ss(format!("{}  ·  {} ms  ·  {}", p.version, p.latency, if m.via == "ssh" { "SSH-Tunnel".to_string() } else { format!("{}:{}", m.host, m.game_port) })));
         }
-        Some(Err(e)) => { s.set_mc_pill("Offline".into()); s.set_mc_pill_kind("warn".into()); s.set_mc_motd(ss(e)); s.set_mc_meta("".into()); }
+        Some(Err(e)) => {
+            s.set_mc_pill("Offline".into());
+            s.set_mc_pill_kind("warn".into());
+            s.set_mc_has_icon(false);
+            s.set_mc_motd_runs(runs(vec![(e.clone(), (255, 107, 107), false)]));
+            s.set_mc_meta("".into());
+        }
     }
 }
 
@@ -804,12 +922,13 @@ async fn mc_refresh(id: String) {
 }
 
 fn mc_log(text: impl AsRef<str>, kind: &str) {
-    let l = line(text, kind);
+    let base = match kind { "cmd" => (85, 255, 85), "err" => (255, 107, 107), "info" => (139, 147, 167), _ => (224, 224, 224) };
+    let rows = mc::styled(text.as_ref(), base, 150);
     ui(move |_, s| {
-        let mut v: Vec<LineItem> = s.get_mc_lines().iter().collect();
-        v.push(l);
-        if v.len() > 800 { v.drain(0..200); }
-        s.set_mc_lines(model(v));
+        let mut v: Vec<TermRow> = s.get_mc_rows().iter().collect();
+        v.extend(rows.into_iter().map(|r| TermRow { runs: runs(r) }));
+        if v.len() > 1500 { v.drain(0..300); }
+        s.set_mc_rows(model(v));
     });
 }
 
@@ -818,7 +937,7 @@ fn mc_run(cmd: String, echo: bool) {
     spawn(async move {
         if echo { mc_log(format!("/{cmd}"), "cmd"); }
         match mc_command(&id, &cmd).await {
-            Ok(o) if echo => mc_log(if o.is_empty() { "(keine Ausgabe)".to_string() } else { mc::strip(&o) }, ""),
+            Ok(o) if echo => mc_log(if o.is_empty() { "(keine Ausgabe)" } else { &o }, ""),
             Ok(o) => toast(if o.is_empty() { format!("/{cmd} ausgeführt") } else { mc::strip(&o) }, "ok"),
             Err(e) if echo => mc_log(e.to_string(), "err"),
             Err(e) => toast(e.to_string(), "err"),
@@ -910,7 +1029,12 @@ fn render_claude(s: &S<'_>) {
 }
 
 fn audit_load(s: &S<'_>) {
-    let list = mcp::audit(&s.get_au_search(), "", s.get_au_changes());
+    let names: Vec<SharedString> = std::iter::once(ss("Alle Server")).chain(store::read().servers.iter().map(|x| ss(&x.name))).collect();
+    let idx = (s.get_au_server().max(0) as usize).min(names.len() - 1);
+    let server = if idx == 0 { String::new() } else { names[idx].to_string() };
+    s.set_au_servers(model(names));
+    s.set_au_server(idx as i32);
+    let list = mcp::audit(&s.get_au_search(), &server, s.get_au_changes());
     let changes = ["run_command", "write_file", "delete_path", "power_server", "create_backup", "nginx_test_and_reload"];
     let n = list.iter().filter(|e| changes.contains(&e["tool"].as_str().unwrap_or(""))).count();
     s.set_au_stats(ss(format!("{} Einträge · davon {n} Änderungen am Server", list.len())));
@@ -1115,7 +1239,31 @@ pub fn run(app: &AppWindow) {
             match fire::console_url(&srv).await { Ok(u) => { let _ = open::that(u); } Err(e) => toast(format!("noVNC: {e}"), "err") }
         });
     });
+    s.on_term_sel(|x, y, start| {
+        let (rows, cols) = *TERM_SIZE.lock().unwrap();
+        let cell = *CELL_W.lock().unwrap();
+        let pos = (((y - 10.0) / 18.0).clamp(0.0, rows as f32 - 1.0) as u16, ((x - 10.0) / cell).clamp(0.0, cols as f32 - 1.0) as u16);
+        {
+            let mut g = SEL.lock().unwrap();
+            match (*g, start) {
+                (Some((a, _)), false) => *g = Some((a, pos)),
+                _ => *g = Some((pos, pos)),
+            }
+        }
+        term_render();
+    });
     s.on_term_key(|t, ctrl, alt| {
+        let first = t.chars().next().unwrap_or(' ');
+        // Strg+C kopiert eine Auswahl, sonst geht es als Abbruch an den Server
+        if ctrl && matches!(first, 'c' | 'C' | '\u{3}') {
+            if let Some(text) = sel_text() {
+                if let Ok(mut c) = arboard::Clipboard::new() { let _ = c.set_text(text); toast("Auswahl kopiert", "ok"); }
+                *SEL.lock().unwrap() = None;
+                term_render();
+                return;
+            }
+        }
+        *SEL.lock().unwrap() = None;
         if let Some(tx) = TERM_TX.lock().unwrap().as_ref() {
             let b = key_bytes(&t, ctrl, alt);
             if !b.is_empty() { let _ = tx.send(TermMsg::Input(b)); }
@@ -1127,11 +1275,13 @@ pub fn run(app: &AppWindow) {
         }
     });
     s.on_term_copy(|| {
-        let text = PARSER.lock().unwrap().as_ref().map(|p| p.screen().contents()).unwrap_or_default();
+        let text = sel_text().or_else(|| PARSER.lock().unwrap().as_ref().map(|p| p.screen().contents())).unwrap_or_default();
         if let Ok(mut c) = arboard::Clipboard::new() { let _ = c.set_text(text); toast("Bildschirminhalt kopiert", "ok"); }
     });
-    s.on_term_resize(|w, h| {
-        let (cols, rows) = (((w - 20.0) / 7.8).max(20.0) as u16, ((h - 20.0) / 18.0).max(5.0) as u16);
+    s.on_term_resize(|w, h, cell| {
+        let cell = if cell > 1.0 { cell } else { 7.6 };
+        *CELL_W.lock().unwrap() = cell;
+        let (cols, rows) = (((w - 20.0) / cell).max(20.0) as u16, ((h - 20.0) / 18.0).max(5.0) as u16);
         *TERM_SIZE.lock().unwrap() = (rows, cols);
         if let Some(p) = PARSER.lock().unwrap().as_mut() { p.set_size(rows, cols); }
         if let Some(tx) = TERM_TX.lock().unwrap().as_ref() { let _ = tx.send(TermMsg::Resize(cols as u32, rows as u32)); }
@@ -1175,16 +1325,28 @@ pub fn run(app: &AppWindow) {
         spawn(async move {
             let d = rfd::AsyncFileDialog::new();
             let picked: Vec<PathBuf> = if dirs { d.pick_folders().await } else { d.pick_files().await }.unwrap_or_default().iter().map(|f| f.path().to_path_buf()).collect();
-            if picked.is_empty() { return; }
-            let r = match ensure_remote().await { Ok(r) => r, Err(e) => return toast(e.to_string(), "err") };
-            let dir = st().cwd.clone();
-            let name = picked[0].file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
-            let (id, job) = transfer_start(true, if picked.len() == 1 { format!("{name} → {dir}") } else { format!("{} Elemente → {dir}", picked.len()) });
-            let res = ssh::upload(r.sftp.clone(), picked, dir, job).await;
-            transfer_end(&id, res);
-            load_files(None).await;
+            start_upload(picked).await;
         });
     });
+    {
+        use slint::winit_030::{winit::event::WindowEvent, EventResult, WinitWindowAccessor};
+        app.window().on_winit_window_event(|_, e| {
+            match e {
+                WindowEvent::HoveredFile(_) => ui(|_, s| { if s.get_tab() == 2 && s.get_active_mc().is_empty() { s.set_drop_hover(true); } }),
+                WindowEvent::HoveredFileCancelled => ui(|_, s| s.set_drop_hover(false)),
+                WindowEvent::DroppedFile(p) => {
+                    let p = p.clone();
+                    ui(move |_, s| {
+                        s.set_drop_hover(false);
+                        if s.get_tab() == 2 && s.get_active_mc().is_empty() { on_drop(p); }
+                        else { toast("Zum Hochladen zuerst den Tab „Dateien“ öffnen.", "info"); }
+                    });
+                }
+                _ => {}
+            }
+            EventResult::Propagate
+        });
+    }
     s.on_fm_download(|n| {
         let paths = selected_paths(&n);
         if paths.is_empty() { return; }
@@ -1250,6 +1412,7 @@ pub fn run(app: &AppWindow) {
     });
 
     // Editor
+    s.on_ed_edited(|| ui(|_, s| s.set_ed_gutter(ss(gutter(&s.get_ed_text())))));
     s.on_ed_close(|| ui(|_, s| {
         if s.get_ed_text().as_str() == st().ed_original { s.set_ed_open(false); return; }
         confirm("Ungespeicherte Änderungen verwerfen?", "", "Verwerfen", || ui(|_, s| s.set_ed_open(false)));
@@ -1417,7 +1580,10 @@ pub fn run(app: &AppWindow) {
         let first = ui_active_mc() != id;
         ui(move |_, s| {
             s.set_active_mc(ss(&id));
-            if first { s.set_mc_lines(model(vec![line("RCON-Konsole. Befehle ohne „/“ eingeben.", "info")])); }
+            if first {
+                s.set_mc_rows(model(vec![]));
+                mc_log("RCON-Konsole. Befehle ohne „/“ eingeben.", "info");
+            }
             render_mc(&s);
             let tab = s.get_mc_tab();
             spawn(mc_refresh(id.clone()));
@@ -1578,10 +1744,41 @@ pub fn run(app: &AppWindow) {
     s.set_dc_state(ss(&d.state));
     s.set_dc_large(ss(&d.large_image));
     s.set_dc_large_text(ss(&d.large_text));
+    s.set_dc_small(ss(&d.small_image));
+    s.set_dc_small_text(ss(&d.small_text));
+    s.set_dc_type(match d.kind { 3 => 1, 2 => 2, 5 => 3, _ => 0 });
+    s.set_dc_timer(match d.timer.as_str() { "app" => 1, "none" => 2, _ => 0 });
+    let btn = |i: usize| d.buttons.get(i).cloned().unwrap_or_default();
+    s.set_dc_b1l(ss(btn(0).label)); s.set_dc_b1u(ss(btn(0).url));
+    s.set_dc_b2l(ss(btn(1).label)); s.set_dc_b2u(ss(btn(1).url));
+    s.on_dc_init(|| ui(|_, s| {
+        let d = store::read();
+        let mut names = vec![ss("Gerade ausgewählter Server"), ss("Alle Server (Übersicht)")];
+        names.extend(d.servers.iter().map(|x| ss(&x.name)));
+        s.set_dc_servers(model(names));
+        s.set_dc_server(match d.discord.server.as_str() {
+            "active" => 0,
+            "all" => 1,
+            id => d.servers.iter().position(|x| x.id == id).map(|i| i as i32 + 2).unwrap_or(0),
+        });
+    }));
     s.on_dc_set_enabled(|v| { store::update(|s| s.discord.enabled = v); ui(move |_, s| s.set_dc_enabled(v)); });
     s.on_dc_save(|| ui(|_, s| {
         let (a, b, c, e) = (s.get_dc_details().to_string(), s.get_dc_state().to_string(), s.get_dc_large().to_string(), s.get_dc_large_text().to_string());
-        store::update(|st| { st.discord.details = a; st.discord.state = b; st.discord.large_image = c; st.discord.large_text = e; });
+        let (small, small_text) = (s.get_dc_small().to_string(), s.get_dc_small_text().to_string());
+        let kind = [0u8, 3, 2, 5][s.get_dc_type().clamp(0, 3) as usize];
+        let timer = ["uptime", "app", "none"][s.get_dc_timer().clamp(0, 2) as usize].to_string();
+        let idx = s.get_dc_server();
+        let buttons: Vec<store::Button> = [(s.get_dc_b1l(), s.get_dc_b1u()), (s.get_dc_b2l(), s.get_dc_b2u())].into_iter()
+            .filter(|(l, u)| !l.is_empty() || !u.is_empty())
+            .map(|(l, u)| store::Button { label: l.trim().to_string(), url: u.trim().to_string() }).collect();
+        if buttons.iter().any(|b| !b.url.starts_with("https://")) { toast("Button-Links müssen mit https:// beginnen", "err"); }
+        store::update(|st| {
+            st.discord.server = match idx { 0 | -1 => "active".into(), 1 => "all".into(), i => st.servers.get(i as usize - 2).map(|x| x.id.clone()).unwrap_or_else(|| "active".into()) };
+            st.discord.details = a; st.discord.state = b; st.discord.large_image = c; st.discord.large_text = e;
+            st.discord.small_image = small; st.discord.small_text = small_text;
+            st.discord.kind = kind; st.discord.timer = timer; st.discord.buttons = buttons;
+        });
     }));
     s.on_dc_portal(|| { let _ = open::that("https://discord.com/developers/applications"); });
 
@@ -1680,6 +1877,8 @@ async fn tour(dir: String) {
     });
     wait(3000).await;
     shot("r1-overview", dir.clone());
+    ui(|_, s| { s.set_srv_pass_show(true); });
+    wait(100).await;
     ui(|_, s| { s.set_tab(1); });
     wait(400).await;
     ui(|_, s| { s.set_ssh_pass("test123".into()); s.invoke_ssh_connect(); });
@@ -1687,7 +1886,19 @@ async fn tour(dir: String) {
     if let Some(tx) = TERM_TX.lock().unwrap().as_ref() { let _ = tx.send(TermMsg::Input(b"ls --color\r".to_vec())); }
     wait(800).await;
     println!("TEST terminal: {:?}", PARSER.lock().unwrap().as_ref().map(|p| p.screen().contents()));
+    ui(|_, s| { s.invoke_term_sel(30.0, 62.0, true); s.invoke_term_sel(150.0, 62.0, false); });
+    wait(300).await;
+    println!("TEST auswahl: {:?}", sel_text());
+    shot("r2b-select", dir.clone());
+    if let Some(tx) = TERM_TX.lock().unwrap().as_ref() { let _ = tx.send(TermMsg::Input(Vec::new())); }
+    println!("TEST spalten: {:?}", TERM_SIZE.lock().unwrap());
     shot("r2-console", dir.clone());
+    ui(|_, s| { s.set_tab(0); });
+    wait(500).await;
+    ui(|_, s| println!("TEST passwort: {:?}", s.get_srv_pass()));
+    shot("r1b-password", dir.clone());
+    ui(|_, s| { s.set_tab(1); });
+    wait(300).await;
     for (i, name) in [(2, "r3-files"), (3, "r4-nginx"), (4, "r5-stats"), (5, "r6-backups")] {
         ui(move |_, s| { s.set_tab(i); s.invoke_tab_changed(i); });
         wait(2500).await;
@@ -1699,6 +1910,11 @@ async fn tour(dir: String) {
     wait(1000).await;
     shot("r7-editor", dir.clone());
     ui(|_, s| s.set_ed_open(false));
+    if let Ok(f) = std::env::var("FIRE_DROP") {
+        on_drop(PathBuf::from(f));
+        wait(1200).await;
+        println!("TEST drop: {:?}", st().entries.iter().map(|e| e.name.clone()).collect::<Vec<_>>());
+    }
     if let Ok(big) = std::env::var("FIRE_BIG") {
         if let Ok(r) = ensure_remote().await {
             let (id, job) = transfer_start(true, "bigfile.bin → /root".into());
@@ -1734,10 +1950,20 @@ async fn tour(dir: String) {
     ui(|_, s| s.set_cl_open(true));
     wait(800).await;
     shot("r11-claude", dir.clone());
-    ui(|_, s| { s.set_cl_open(false); s.set_dc_open(true); });
+    ui(|_, s| { s.set_cl_open(false); s.invoke_dc_init(); s.set_dc_open(true); });
     wait(800).await;
     shot("r12-discord", dir.clone());
-    ui(|_, s| s.set_dc_open(false));
+    ui(|_, s| {
+        s.set_dc_type(1); s.set_dc_timer(2); s.set_dc_b1l("Zum Server".into()); s.set_dc_b1u("https://example.de".into());
+        s.invoke_dc_save(); s.set_dc_open(false);
+    });
+    wait(1500).await;
+    let d = store::read().discord;
+    println!("TEST discord: kind={} timer={} buttons={}", d.kind, d.timer, d.buttons.len());
+    ui(|_, s| { s.set_au_server(1); s.invoke_au_load(); s.set_au_open(true); });
+    wait(1500).await;
+    shot("r13-audit", dir.clone());
+    ui(|_, s| s.set_au_open(false));
     if std::env::var("FIRE_STAY").is_ok() { return; }
     wait(500).await;
     let _ = slint::invoke_from_event_loop(|| { let _ = slint::quit_event_loop(); });

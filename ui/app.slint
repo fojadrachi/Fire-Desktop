@@ -1,14 +1,8 @@
-import "fonts/SpaceGrotesk-Regular.ttf";
-import "fonts/SpaceGrotesk-Medium.ttf";
-import "fonts/SpaceGrotesk-Bold.ttf";
-import "fonts/JetBrainsMono-Medium.ttf";
-import "fonts/JetBrainsMono-Bold.ttf";
-
-import { ScrollView, TextEdit, ComboBox } from "std-widgets.slint";
+import { ScrollView, ComboBox } from "std-widgets.slint";
 import { Theme, Icons } from "theme.slint";
 import { Icon, FilledIcon, Button, IconButton, Field, Label, Tag, Card, ProgressBar, Toggle, Segmented, Check } from "widgets.slint";
 import { S, SideItem } from "state.slint";
-import { ServerView, LineLog } from "server.slint";
+import { ServerView, RowLog } from "server.slint";
 
 export { S }
 
@@ -122,7 +116,7 @@ component Sidebar inherits Rectangle {
             TouchArea { mouse-cursor: pointer; clicked => { S.up-open = true; } }
         }
         SideButton { text: "Claude-Zugriff"; icon: Icons.sparkle; state: S.cl-side; clicked => { S.cl-open = true; } }
-        SideButton { text: "Discord-Status"; icon: Icons.chat; state: S.dc-side; clicked => { S.dc-open = true; } }
+        SideButton { text: "Discord-Status"; icon: Icons.chat; state: S.dc-side; clicked => { S.dc-init(); S.dc-open = true; } }
         SideButton { text: "Server hinzufügen"; icon: Icons.plus; clicked => { S.add-step = 0; S.add-error = ""; S.add-key = ""; S.add-open = true; } }
         Text { text: S.foot; color: Theme.dim; font-size: 12px; }
         HorizontalLayout {
@@ -241,12 +235,67 @@ component NewSiteDialog inherits Overlay {
     }
 }
 
+component CodeEditor inherits Rectangle {
+    background: #07080c;
+    border-radius: 10px;
+    border-width: 1px;
+    border-color: Theme.line-hi;
+    clip: true;
+    forward-focus: ti;
+    sv := ScrollView {
+        content-height: max(self.visible-height, ti.preferred-height + 24px);
+        content-width: max(self.visible-width, ti.preferred-width + 90px);
+        Rectangle {
+            x: 0;
+            y: 0;
+            width: 56px;
+            height: parent.height;
+            background: #0a0c11;
+        }
+        Text {
+            x: 0;
+            y: 12px;
+            width: 46px;
+            text: S.ed-gutter;
+            color: Theme.dim;
+            font-family: Theme.mono;
+            font-size: 13px;
+            horizontal-alignment: right;
+        }
+        ti := TextInput {
+            x: 68px;
+            y: 12px;
+            width: parent.width - 80px;
+            height: self.preferred-height;
+            text <=> S.ed-text;
+            color: Theme.fg;
+            font-family: Theme.mono;
+            font-size: 13px;
+            single-line: false;
+            selection-background-color: #ff6a2b55;
+            edited => { S.ed-edited(); }
+            cursor-position-changed(p) => {
+                // Cursor beim Tippen sichtbar halten
+                if (p.y + 12px + sv.content-y < 0) { sv.content-y = -(p.y + 12px); }
+                if (p.y + 40px + sv.content-y > sv.visible-height) { sv.content-y = sv.visible-height - p.y - 40px; }
+            }
+        }
+    }
+}
+
 component EditorDialog inherits Overlay {
     title: S.ed-path;
     box-width: 1200px;
     box-height: 9000px;
     close => { S.ed-close(); }
-    TextEdit { text <=> S.ed-text; font-size: 13px; vertical-stretch: 1; }
+    FocusScope {
+        vertical-stretch: 1;
+        key-pressed(e) => {
+            if (e.modifiers.control && (e.text == "s" || e.text == "S")) { S.ed-save(); return accept; }
+            reject
+        }
+        ce := CodeEditor { }
+    }
     if S.ed-msg != "": Text { text: S.ed-msg; color: S.ed-msg-ok ? Theme.good : Theme.bad; font-family: Theme.mono; font-size: 12px; wrap: word-wrap; }
     HorizontalLayout {
         spacing: 8px;
@@ -289,7 +338,17 @@ component McView inherits VerticalLayout {
         padding-right: 24px;
         padding-top: 18px;
         padding-bottom: 12px;
-        spacing: 8px;
+        spacing: 12px;
+        Rectangle {
+            width: 56px;
+            height: 56px;
+            horizontal-stretch: 0;
+            border-radius: 8px;
+            background: Theme.panel;
+            clip: true;
+            if S.mc-has-icon: Image { width: 100%; height: 100%; source: S.mc-icon; image-rendering: pixelated; }
+            if !S.mc-has-icon: Icon { d: Icons.cube; size: 26px; tint: #6bbf47; }
+        }
         VerticalLayout {
             spacing: 3px;
             alignment: center;
@@ -300,7 +359,10 @@ component McView inherits VerticalLayout {
                 Text { text: S.mc-name; color: Theme.fg; font-size: 21px; font-weight: 700; }
                 VerticalLayout { alignment: center; Tag { text: S.mc-pill; kind: S.mc-pill-kind; } }
             }
-            Text { text: S.mc-motd; color: Theme.acc-hi; font-family: Theme.mono; font-size: 13px; overflow: elide; }
+            HorizontalLayout {
+                alignment: start;
+                for r in S.mc-motd-runs: Text { text: r.text; color: r.fg; font-family: Theme.mono; font-size: 13px; font-weight: r.bold ? 700 : 400; }
+            }
             Text { text: S.mc-meta; color: Theme.mut; font-family: Theme.mono; font-size: 12px; overflow: elide; }
         }
         Button { text: "Speichern"; clicked => { S.mc-cmd("save-all"); } }
@@ -333,7 +395,7 @@ component McView inherits VerticalLayout {
                 alignment: start;
                 for c in ["list", "save-all", "time set day", "weather clear", "whitelist list", "banlist players", "tps", "help"]: Button { text: c; small: true; clicked => { S.mc-cmd(c); } }
             }
-            if S.mc-tab == 0: LineLog { lines: S.mc-lines; vertical-stretch: 1; }
+            if S.mc-tab == 0: RowLog { rows: S.mc-rows; vertical-stretch: 1; }
             if S.mc-tab == 0: Field { text <=> S.mc-input; mono: true; placeholder: "Befehl ohne /, z. B. say Hallo"; accepted => { S.mc-send(); } }
             if S.mc-tab == 1: ScrollView {
                 VerticalLayout {
@@ -452,6 +514,7 @@ component AuditDialog inherits Overlay {
     HorizontalLayout {
         spacing: 8px;
         Field { text <=> S.au-search; placeholder: "Suchen (Befehl, Pfad, Ausgabe …)"; horizontal-stretch: 1; edited(t) => { S.au-load(); } }
+        ComboBox { width: 180px; model: S.au-servers; current-index <=> S.au-server; selected => { S.au-load(); } }
         Button { text: S.au-changes ? "Alle zeigen" : "Nur Änderungen"; clicked => { S.au-changes = !S.au-changes; S.au-load(); } }
         Button { text: "Exportieren"; clicked => { S.au-export(); } }
         Button { text: "Leeren"; kind: "danger"; clicked => { S.au-clear(); } }
@@ -508,30 +571,62 @@ component AskDialog inherits Overlay {
 
 component DiscordDialog inherits Overlay {
     title: "Discord-Status";
-    box-width: 640px;
+    box-width: 700px;
+    box-height: 760px;
     close => { S.dc-save(); S.dc-open = false; }
     HorizontalLayout {
         Tag { text: S.dc-status; kind: S.dc-status-kind; }
-        Rectangle { }
+        Rectangle { horizontal-stretch: 1; }
         Toggle { on: S.dc-enabled; toggled(v) => { S.dc-set-enabled(v); } }
     }
-    Hint { text: "Platzhalter: {name} {status} {cpu} {ram} {ram_max} {ram_pct} {disk} {disk_max} {uptime} {traffic} {traffic_max} {cores} {os} {servers} {online}"; }
-    Field { text <=> S.dc-details; placeholder: "Zeile 1"; }
-    Field { text <=> S.dc-state; placeholder: "Zeile 2"; }
-    HorizontalLayout {
-        spacing: 8px;
-        Field { text <=> S.dc-large; mono: true; placeholder: "Bild (Asset-Name)"; }
-        Field { text <=> S.dc-large-text; placeholder: "Bild-Text"; }
-    }
-    Rectangle {
-        height: 72px;
-        background: #232428;
-        border-radius: 10px;
+    ScrollView {
+        vertical-stretch: 1;
         VerticalLayout {
-            padding: 12px;
-            alignment: center;
-            Text { text: S.dc-pv-details; color: #f2f3f5; font-weight: 700; }
-            Text { text: S.dc-pv-state; color: #dbdee1; }
+            spacing: 10px;
+            alignment: start;
+            Rectangle {
+                height: 84px;
+                background: #232428;
+                border-radius: 10px;
+                VerticalLayout {
+                    padding: 12px;
+                    alignment: center;
+                    Text { text: S.dc-pv-details; color: #f2f3f5; font-weight: 700; }
+                    Text { text: S.dc-pv-state; color: #dbdee1; }
+                }
+            }
+            HorizontalLayout {
+                spacing: 8px;
+                VerticalLayout { spacing: 4px; Label { text: "SERVER"; } ComboBox { model: S.dc-servers; current-index <=> S.dc-server; } }
+                VerticalLayout { spacing: 4px; Label { text: "ANZEIGE ALS"; } ComboBox { model: ["Spielt …", "Schaut …", "Hört …", "Tritt an in …"]; current-index <=> S.dc-type; } }
+                VerticalLayout { spacing: 4px; Label { text: "ZEIT"; } ComboBox { model: ["Server-Laufzeit", "Seit App-Start", "Keine"]; current-index <=> S.dc-timer; } }
+            }
+            Label { text: "TEXT"; }
+            Field { text <=> S.dc-details; placeholder: "Zeile 1"; }
+            Field { text <=> S.dc-state; placeholder: "Zeile 2"; }
+            Hint { text: "Platzhalter: {name} {status} {cpu} {ram} {ram_max} {ram_pct} {disk} {disk_max} {uptime} {traffic} {traffic_max} {cores} {os} {servers} {online}"; }
+            Label { text: "BILDER"; }
+            HorizontalLayout {
+                spacing: 8px;
+                Field { text <=> S.dc-large; mono: true; placeholder: "Großes Bild (Asset-Name)"; }
+                Field { text <=> S.dc-large-text; placeholder: "Text beim Drüberfahren"; }
+            }
+            HorizontalLayout {
+                spacing: 8px;
+                Field { text <=> S.dc-small; mono: true; placeholder: "Kleines Bild (optional)"; }
+                Field { text <=> S.dc-small-text; placeholder: "Text kleines Bild"; }
+            }
+            Label { text: "BUTTONS (OPTIONAL, NUR ANDERE SEHEN SIE)"; }
+            HorizontalLayout {
+                spacing: 8px;
+                Field { text <=> S.dc-b1l; placeholder: "Beschriftung"; }
+                Field { text <=> S.dc-b1u; mono: true; placeholder: "https://…"; }
+            }
+            HorizontalLayout {
+                spacing: 8px;
+                Field { text <=> S.dc-b2l; placeholder: "Beschriftung"; }
+                Field { text <=> S.dc-b2u; mono: true; placeholder: "https://…"; }
+            }
         }
     }
     HorizontalLayout {
@@ -595,6 +690,13 @@ export component AppWindow inherits Window {
             Text { text: "Erstelle unter cp.24fire.de → Kontoeinstellungen → API-Keys einen Token und füge deinen Server hinzu."; color: Theme.mut; horizontal-alignment: center; }
             HorizontalLayout { alignment: center; Button { text: "Server hinzufügen"; kind: "primary"; clicked => { S.add-step = 0; S.add-open = true; } } }
         }
+    }
+
+    if S.drop-hover: Rectangle {
+        background: #ff6a2b22;
+        border-width: 2px;
+        border-color: Theme.acc;
+        Text { text: "Dateien hier ablegen zum Hochladen"; color: Theme.acc-hi; font-size: 20px; font-weight: 700; }
     }
 
     // Übertragungen

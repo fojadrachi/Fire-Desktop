@@ -20,6 +20,7 @@ pub struct Ping {
     pub sample: Vec<String>,
     pub motd: String,
     pub latency: u128,
+    pub favicon: Option<Vec<u8>>,
 }
 
 fn var_int(mut v: u32, out: &mut Vec<u8>) {
@@ -101,6 +102,10 @@ pub async fn ping(mut s: BoxStream, host: &str, port: u16) -> Result<Ping> {
             sample: j["players"]["sample"].as_array().into_iter().flatten().filter_map(|p| p["name"].as_str().map(String::from)).collect(),
             motd: chat(&j["description"]),
             latency: started.elapsed().as_millis(),
+            favicon: j["favicon"].as_str().and_then(|f| f.split_once(',')).and_then(|(_, b)| {
+                use base64::Engine;
+                base64::engine::general_purpose::STANDARD.decode(b.trim()).ok()
+            }),
         })
     }).await.map_err(|_| anyhow!("Keine Status-Antwort (Zeitüberschreitung)"))?
 }
@@ -203,4 +208,35 @@ pub fn parse_list(out: &str) -> ListResult {
         }
     }
     ListResult { online: nums.first().copied().unwrap_or(names.len() as i64), max: nums.get(1).copied().unwrap_or(0), names }
+}
+
+/// Text mit §-Codes in formatierte Zeilen: je Zeile Abschnitte (Text, Farbe, fett). Lange Zeilen werden umbrochen.
+pub fn styled(text: &str, base: (u8, u8, u8), wrap: usize) -> Vec<Vec<(String, (u8, u8, u8), bool)>> {
+    const C: [(u8, u8, u8); 16] = [(0, 0, 0), (0, 0, 170), (0, 170, 0), (0, 170, 170), (170, 0, 0), (170, 0, 170), (255, 170, 0), (170, 170, 170), (85, 85, 85), (85, 85, 255), (85, 255, 85), (85, 255, 255), (255, 85, 85), (255, 85, 255), (255, 255, 85), (255, 255, 255)];
+    let (mut color, mut bold) = (base, false);
+    let mut out = Vec::new();
+    for l in text.split('\n') {
+        let mut row: Vec<(String, (u8, u8, u8), bool)> = Vec::new();
+        let mut n = 0;
+        let mut it = l.chars();
+        while let Some(c) = it.next() {
+            if c == '§' {
+                match it.next().map(|x| x.to_ascii_lowercase()) {
+                    Some(h) if h.is_ascii_hexdigit() => { color = C[h.to_digit(16).unwrap_or(15) as usize]; bold = false; }
+                    Some('l') => bold = true,
+                    Some('r') => { color = base; bold = false; }
+                    _ => {}
+                }
+                continue;
+            }
+            if n >= wrap { out.push(std::mem::take(&mut row)); n = 0; }
+            match row.last_mut() {
+                Some(r) if r.1 == color && r.2 == bold => r.0.push(c),
+                _ => row.push((c.to_string(), color, bold)),
+            }
+            n += 1;
+        }
+        out.push(row);
+    }
+    out
 }
