@@ -1,0 +1,905 @@
+<!doctype html>
+<html lang="de">
+<head>
+  <meta charset="utf-8">
+  <meta http-equiv="Content-Security-Policy"
+        content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; frame-src https:;">
+  <title>Fire Desktop</title>
+  <link rel="stylesheet" href="../../node_modules/@xterm/xterm/css/xterm.css">
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <div class="app">
+    <!-- Seitenleiste -->
+    <aside class="sidebar">
+      <div class="brand">
+        <img class="brand-logo" src="../../build/icon.png" alt="">
+        <div>
+          <div class="brand-name">Fire Desktop</div>
+          <div class="brand-sub">24fire Server-Verwaltung</div>
+        </div>
+      </div>
+
+      <div class="sidebar-scroll">
+        <div class="sidebar-label">Server</div>
+        <ul id="serverList" class="server-list"></ul>
+
+        <div class="sidebar-label mc-label">
+          <span>Minecraft</span>
+          <button class="mc-add-mini" id="mcAddBtn" title="Minecraft-Server hinzufügen">+</button>
+        </div>
+        <ul id="mcList" class="server-list"></ul>
+        <div class="mc-empty-hint" id="mcEmptyHint">Minecraft-Server per RCON steuern – mit <b>+</b> hinzufügen.</div>
+      </div>
+
+      <button id="claudeBtn" class="btn btn-ghost claude-btn" title="Claude & KI-Agenten Zugriff geben">
+        <svg viewBox="0 0 24 24" class="claude-ic"><path d="M12 2l2.2 6.8L21 11l-6.8 2.2L12 20l-2.2-6.8L3 11l6.8-2.2z"/></svg>
+        Claude-Zugriff
+        <span class="claude-state" id="claudeState">Aus</span>
+      </button>
+      <button id="discordBtn" class="btn btn-ghost claude-btn" title="Server-Stats als Discord-Status anzeigen">
+        <svg viewBox="0 0 24 24" class="discord-ic"><path d="M19.6 5.3A16.5 16.5 0 0 0 15.5 4l-.5 1a15 15 0 0 0-6 0l-.5-1a16.5 16.5 0 0 0-4.1 1.3C1.8 9.2 1.1 13 1.4 16.7A16.6 16.6 0 0 0 6.5 19.3l1-1.6c-.6-.2-1.1-.5-1.6-.8l.4-.3a11.8 11.8 0 0 0 11.4 0l.4.3c-.5.3-1 .6-1.6.8l1 1.6a16.5 16.5 0 0 0 5.1-2.6c.4-4.3-.6-8-2.9-11.4zM8.7 14.5c-1 0-1.8-.9-1.8-2s.8-2 1.8-2 1.8.9 1.8 2-.8 2-1.8 2zm6.6 0c-1 0-1.8-.9-1.8-2s.8-2 1.8-2 1.8.9 1.8 2-.8 2-1.8 2z"/></svg>
+        Discord-Status
+        <span class="claude-state" id="discordState">Aus</span>
+      </button>
+      <button id="addServerBtn" class="btn btn-ghost add-btn">
+        <span class="plus">+</span> Server hinzufügen
+      </button>
+
+      <button class="update-bar hidden" id="updateBar"></button>
+      <div class="sidebar-foot" id="sidebarFoot">Keine Server</div>
+      <div class="sidebar-legal">
+        <a href="#" data-legal="datenschutz">Datenschutz</a> · <a href="#" data-legal="nutzung">Nutzungsbedingungen</a>
+      </div>
+      <div class="sidebar-legal"><a href="#" id="updateCheck" title="Nach Updates suchen"><span id="appVersion"></span></a></div>
+    </aside>
+
+    <!-- Hauptbereich -->
+    <main class="main">
+      <section id="emptyState" class="empty">
+        <img class="empty-logo" src="../../build/icon.png" alt="">
+        <h1>Noch kein Server verbunden</h1>
+        <p>Erstelle im 24fire Control Panel unter <b>Kontoeinstellungen → API-Keys</b> einen Token und füge deinen Server damit hinzu.</p>
+        <button class="btn btn-primary" id="emptyAddBtn">Server hinzufügen</button>
+      </section>
+
+      <section id="mcView" class="server-view hidden">
+        <header class="topbar">
+          <img class="mc-favicon" id="mcFavicon" src="data:," alt="">
+          <div class="title-block">
+            <div class="title-row">
+              <h1 id="mcName">–</h1>
+              <span id="mcStatusPill" class="pill pill-muted">…</span>
+            </div>
+            <div class="mc-motd" id="mcMotd"></div>
+            <div class="meta" id="mcMeta">–</div>
+          </div>
+          <div class="power">
+            <button class="btn btn-start" id="mcSave" title="Welt speichern (save-all)">Speichern</button>
+            <button class="btn btn-stop" id="mcStop" title="Server sauber herunterfahren (stop)">Stoppen</button>
+            <button class="btn btn-icon" id="mcMenuBtn" title="Einstellungen">
+              <svg viewBox="0 0 24 24"><circle cx="5" cy="12" r="2"/><circle cx="12" cy="12" r="2"/><circle cx="19" cy="12" r="2"/></svg>
+            </button>
+            <div class="menu hidden" id="mcMenu">
+              <button data-mc-action="edit">Bearbeiten</button>
+              <button data-mc-action="refresh">Aktualisieren</button>
+              <button data-mc-action="remove" class="danger">Entfernen</button>
+            </div>
+          </div>
+        </header>
+
+        <nav class="tabs" id="mcTabs">
+          <button data-mctab="console" class="active">Konsole</button>
+          <button data-mctab="players">Spieler</button>
+          <button data-mctab="control">Steuerung</button>
+        </nav>
+
+        <div class="tab-body">
+          <div class="tab" data-mcpanel="console">
+            <div class="mc-chips" id="mcChips">
+              <button data-cmd="list">list</button>
+              <button data-cmd="save-all">save-all</button>
+              <button data-cmd="time set day">time set day</button>
+              <button data-cmd="weather clear">weather clear</button>
+              <button data-cmd="whitelist list">whitelist list</button>
+              <button data-cmd="banlist players">banlist</button>
+              <button data-cmd="tps">tps (Paper)</button>
+              <button data-cmd="help">help</button>
+            </div>
+            <div class="terminal mc-terminal">
+              <div class="term-out" id="mcOut"></div>
+              <form class="term-in" id="mcForm" autocomplete="off">
+                <span class="prompt">/</span>
+                <input id="mcInput" spellcheck="false" placeholder="Befehl ohne / eingeben, z. B. say Hallo – Tab ergänzt, ↑↓ Verlauf">
+              </form>
+            </div>
+          </div>
+
+          <div class="tab hidden" data-mcpanel="players">
+            <div class="grid-2">
+              <div class="card">
+                <div class="mc-card-head"><h3 id="mcOnlineTitle">Online</h3><button class="btn btn-sm btn-ghost" id="mcPlayersRefresh">Aktualisieren</button></div>
+                <div class="mc-players" id="mcPlayers"></div>
+              </div>
+              <div class="card">
+                <div class="mc-card-head">
+                  <h3>Whitelist</h3>
+                  <div class="seg mc-seg"><button data-wl="on">An</button><button data-wl="off">Aus</button></div>
+                </div>
+                <form class="mc-inline" id="mcWlForm"><input id="mcWlName" class="input" placeholder="Spielername"><button class="btn btn-primary">Hinzufügen</button></form>
+                <div class="mc-names" id="mcWhitelist"></div>
+                <h3 class="mt">Gebannt</h3>
+                <form class="mc-inline" id="mcBanForm"><input id="mcBanName" class="input" placeholder="Spielername"><input id="mcBanReason" class="input" placeholder="Grund (optional)"><button class="btn btn-danger">Bannen</button></form>
+                <div class="mc-names" id="mcBanlist"></div>
+              </div>
+            </div>
+          </div>
+
+          <div class="tab hidden" data-mcpanel="control">
+            <div class="grid-2">
+              <div class="card">
+                <h3>Nachricht an alle</h3>
+                <form class="mc-inline" id="mcSayForm"><input id="mcSay" class="input" placeholder="Nachricht (say)"><button class="btn btn-primary">Senden</button></form>
+                <h3 class="mt">Zeit</h3>
+                <div class="mc-btns">
+                  <button class="btn btn-ghost" data-cmd="time set day">Tag</button>
+                  <button class="btn btn-ghost" data-cmd="time set noon">Mittag</button>
+                  <button class="btn btn-ghost" data-cmd="time set night">Nacht</button>
+                  <button class="btn btn-ghost" data-cmd="time set midnight">Mitternacht</button>
+                </div>
+                <h3 class="mt">Wetter</h3>
+                <div class="mc-btns">
+                  <button class="btn btn-ghost" data-cmd="weather clear">Klar</button>
+                  <button class="btn btn-ghost" data-cmd="weather rain">Regen</button>
+                  <button class="btn btn-ghost" data-cmd="weather thunder">Gewitter</button>
+                </div>
+                <h3 class="mt">Schwierigkeit</h3>
+                <div class="mc-btns">
+                  <button class="btn btn-ghost" data-cmd="difficulty peaceful">Friedlich</button>
+                  <button class="btn btn-ghost" data-cmd="difficulty easy">Einfach</button>
+                  <button class="btn btn-ghost" data-cmd="difficulty normal">Normal</button>
+                  <button class="btn btn-ghost" data-cmd="difficulty hard">Schwer</button>
+                </div>
+              </div>
+              <div class="card">
+                <div class="mc-card-head"><h3>Spielregeln</h3><button class="btn btn-sm btn-ghost" id="mcRulesRefresh">Aktualisieren</button></div>
+                <div class="mc-rules" id="mcRules"></div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section id="serverView" class="server-view hidden">
+        <header class="topbar">
+          <div class="title-block">
+            <div class="title-row">
+              <h1 id="srvName">–</h1>
+              <span id="srvStatus" class="pill pill-muted">…</span>
+              <span id="srvTask" class="pill pill-warn hidden"></span>
+            </div>
+            <div class="meta" id="srvMeta">–</div>
+          </div>
+          <div class="power">
+            <button class="btn btn-start" data-power="start" title="Starten">
+              <svg viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>Start
+            </button>
+            <button class="btn btn-restart" data-power="restart" title="Neu starten">
+              <svg viewBox="0 0 24 24"><path d="M17.7 6.3A8 8 0 1 0 20 12h-2a6 6 0 1 1-1.8-4.3L13 11h7V4z"/></svg>Neustart
+            </button>
+            <button class="btn btn-stop" data-power="stop" title="Stoppen">
+              <svg viewBox="0 0 24 24"><rect x="6" y="6" width="12" height="12" rx="1.5"/></svg>Stop
+            </button>
+            <button class="btn btn-icon" id="serverMenuBtn" title="Server-Einstellungen">
+              <svg viewBox="0 0 24 24"><circle cx="5" cy="12" r="2"/><circle cx="12" cy="12" r="2"/><circle cx="19" cy="12" r="2"/></svg>
+            </button>
+            <div class="menu hidden" id="serverMenu">
+              <button data-action="rename">Umbenennen</button>
+              <button data-action="key">API-Key ändern</button>
+              <button data-action="refresh">Aktualisieren</button>
+              <button data-action="panel">Im Control Panel öffnen</button>
+              <button data-action="audit">Claude-Protokoll</button>
+              <button data-action="remove" class="danger">Server entfernen</button>
+            </div>
+          </div>
+        </header>
+
+        <nav class="tabs" id="tabs">
+          <button data-tab="overview" class="active">Übersicht</button>
+          <button data-tab="console">Konsole</button>
+          <button data-tab="files">Dateien</button>
+          <button data-tab="nginx">Nginx</button>
+          <button data-tab="stats">Statistiken</button>
+          <button data-tab="backups">Backups</button>
+          <button data-tab="terminal">API-Konsole</button>
+        </nav>
+
+        <div class="tab-body">
+          <!-- Übersicht -->
+          <div class="tab" data-panel="overview">
+            <div class="cards">
+              <div class="card stat">
+                <div class="stat-label">CPU</div>
+                <div class="stat-value" id="statCpu">–</div>
+                <div class="bar"><span id="barCpu"></span></div>
+              </div>
+              <div class="card stat">
+                <div class="stat-label">Arbeitsspeicher</div>
+                <div class="stat-value" id="statMem">–</div>
+                <div class="bar"><span id="barMem"></span></div>
+              </div>
+              <div class="card stat">
+                <div class="stat-label">NVMe-Speicher</div>
+                <div class="stat-value" id="statDisk">–</div>
+                <div class="bar"><span id="barDisk"></span></div>
+              </div>
+              <div class="card stat">
+                <div class="stat-label">Traffic (Monat)</div>
+                <div class="stat-value" id="statTraffic">–</div>
+                <div class="bar"><span id="barTraffic"></span></div>
+              </div>
+            </div>
+
+            <div class="grid-2">
+              <div class="card">
+                <h3>Konfiguration</h3>
+                <dl class="kv" id="cfgList"></dl>
+              </div>
+              <div class="card">
+                <h3>Netzwerk</h3>
+                <div id="netList" class="net-list"></div>
+                <h3 class="mt">Zugang</h3>
+                <dl class="kv" id="accessList"></dl>
+              </div>
+            </div>
+            <div class="card">
+              <h3>Hostsystem</h3>
+              <dl class="kv kv-wide" id="hostList"></dl>
+            </div>
+          </div>
+
+          <!-- Konsole (SSH) -->
+          <div class="tab hidden" data-panel="console">
+            <div class="console-bar">
+              <span class="ssh-state" id="sshState"><span class="dot"></span><span id="sshStateText">Nicht verbunden</span></span>
+              <span class="muted mono" id="sshTarget"></span>
+              <div class="spacer"></div>
+              <button class="btn btn-ghost" id="novncBtn" title="Bildschirm-Konsole (NoVNC) in eigenem Fenster">NoVNC</button>
+              <button class="btn btn-ghost" id="sshSettingsBtn">Zugangsdaten</button>
+              <button class="btn btn-ghost hidden" id="sshDisconnect">Trennen</button>
+              <button class="btn btn-primary" id="sshConnect">Verbinden</button>
+            </div>
+            <div class="card ssh-settings hidden" id="sshSettings">
+              <div class="ssh-grid">
+                <label class="field"><span>Host / IP</span><input id="sshHost" class="input mono"></label>
+                <label class="field"><span>Port</span><input id="sshPort" class="input mono" value="22" inputmode="numeric"></label>
+                <label class="field"><span>Benutzer</span><input id="sshUser" class="input mono"></label>
+                <label class="field"><span>Passwort</span><input id="sshPass" class="input mono" type="password"></label>
+              </div>
+              <p class="hint">Die neue 24fire-API gibt das Root-Passwort nicht mehr heraus: Trage es einmal ein, nach erfolgreicher Anmeldung merkt sich die App es verschlüsselt.
+                <button class="copy" id="sshForget" type="button">Gespeicherten Host-Key vergessen</button></p>
+            </div>
+            <div class="console-frame-wrap">
+              <div class="console-placeholder" id="sshPlaceholder">
+                <div class="placeholder-text">
+                  <div>SSH-Konsole deines Servers</div>
+                  <div class="muted">Direkt als root anmelden – ohne PuTTY & Co.</div>
+                </div>
+              </div>
+              <div id="sshTerm" class="ssh-term"></div>
+            </div>
+          </div>
+
+          <!-- Dateien (SFTP) -->
+          <div class="tab hidden" data-panel="files">
+            <div class="remote-gate card hidden" data-gate>
+              <div>
+                <b>Nicht mit dem Server verbunden</b>
+                <div class="muted">Benutzt die Zugangsdaten aus dem Konsole-Tab (SFTP über SSH).</div>
+              </div>
+              <div class="spacer"></div>
+              <button class="btn btn-primary" data-remote-connect>Verbinden</button>
+            </div>
+
+            <div class="fm-bar">
+              <button class="btn btn-icon" id="fmUp" title="Übergeordneter Ordner">
+                <svg viewBox="0 0 24 24"><path d="M12 5l-7 7h4v7h6v-7h4z"/></svg>
+              </button>
+              <button class="btn btn-icon" id="fmHome" title="Home-Verzeichnis">
+                <svg viewBox="0 0 24 24"><path d="M12 3l9 8h-3v9h-5v-6h-2v6H6v-9H3z"/></svg>
+              </button>
+              <button class="btn btn-icon" id="fmRefresh" title="Aktualisieren">
+                <svg viewBox="0 0 24 24"><path d="M17.7 6.3A8 8 0 1 0 20 12h-2a6 6 0 1 1-1.8-4.3L13 11h7V4z"/></svg>
+              </button>
+              <div class="fm-crumbs" id="fmCrumbs"></div>
+              <input id="fmPath" class="input mono fm-path hidden" spellcheck="false">
+              <input id="fmFilter" class="input fm-filter" placeholder="Filtern…">
+              <button class="btn btn-ghost" id="fmNewFolder">Neuer Ordner</button>
+              <button class="btn btn-ghost" id="fmNewFile">Neue Datei</button>
+              <button class="btn btn-primary" id="fmUpload">Hochladen</button>
+              <div class="menu hidden fm-upload-menu" id="fmUploadMenu">
+                <button data-upload="file">Dateien…</button>
+                <button data-upload="dir">Ordner…</button>
+              </div>
+            </div>
+
+            <div class="fm-selbar hidden" id="fmSelBar">
+              <span id="fmSelCount"></span>
+              <button class="btn btn-sm btn-ghost" id="fmSelDownload">Herunterladen</button>
+              <button class="btn btn-sm btn-danger" id="fmSelDelete">Löschen</button>
+              <button class="btn btn-sm btn-ghost" id="fmSelClear">Auswahl aufheben</button>
+            </div>
+
+            <div class="card table-card fm-table-wrap" id="fmDrop">
+              <table class="table fm-table">
+                <thead><tr>
+                  <th class="fm-check"><input type="checkbox" id="fmCheckAll"></th>
+                  <th data-sort="name">Name</th>
+                  <th data-sort="size" class="num">Größe</th>
+                  <th data-sort="mtime">Geändert</th>
+                  <th>Rechte</th>
+                  <th></th>
+                </tr></thead>
+                <tbody id="fmRows"></tbody>
+              </table>
+              <div class="fm-drop hidden" id="fmDropHint">Dateien hier ablegen zum Hochladen</div>
+            </div>
+
+          </div>
+
+          <!-- Nginx -->
+          <div class="tab hidden" data-panel="nginx">
+            <div class="remote-gate card hidden" data-gate>
+              <div>
+                <b>Nicht mit dem Server verbunden</b>
+                <div class="muted">Benutzt die Zugangsdaten aus dem Konsole-Tab.</div>
+              </div>
+              <div class="spacer"></div>
+              <button class="btn btn-primary" data-remote-connect>Verbinden</button>
+            </div>
+
+            <div class="console-bar">
+              <span class="pill pill-muted" id="ngxStatus">–</span>
+              <span class="muted mono" id="ngxVersion"></span>
+              <div class="spacer"></div>
+              <button class="btn btn-ghost" id="ngxTest">Konfig testen</button>
+              <button class="btn btn-ghost" id="ngxReload">Neu laden</button>
+              <button class="btn btn-ghost" id="ngxRestart">Neustart</button>
+              <button class="btn btn-ghost" id="ngxLogs">Logs</button>
+              <button class="btn btn-primary" id="ngxNew">Neue Site</button>
+            </div>
+
+            <div class="card hidden" id="ngxMissing">
+              <h3>Nginx ist nicht installiert</h3>
+              <p class="muted">Auf Debian/Ubuntu kann Nginx direkt von hier installiert werden (apt-get install nginx).</p>
+              <button class="btn btn-primary" id="ngxInstall">Nginx installieren</button>
+            </div>
+
+            <div id="ngxContent" class="ngx-content">
+              <div class="card">
+                <h3 id="ngxSitesTitle">Sites</h3>
+                <div class="ngx-list" id="ngxSites"></div>
+              </div>
+              <div class="card">
+                <h3>Weitere Konfiguration</h3>
+                <div class="ngx-list" id="ngxOther"></div>
+              </div>
+            </div>
+
+            <div class="card ngx-output hidden" id="ngxOutputCard">
+              <div class="ngx-output-head">
+                <h3 id="ngxOutputTitle">Ausgabe</h3>
+                <button class="copy" id="ngxOutputClose">Schließen</button>
+              </div>
+              <pre id="ngxOutput"></pre>
+            </div>
+          </div>
+
+          <!-- Statistiken -->
+          <div class="tab hidden" data-panel="stats">
+            <div class="console-bar">
+              <div class="seg" id="rangeSeg">
+                <button data-range="hour" class="active">Stunde</button>
+                <button data-range="day">Tag</button>
+                <button data-range="week">Woche</button>
+                <button data-range="month">Monat</button>
+                <button data-range="year">Jahr</button>
+              </div>
+              <div class="seg" id="aggSeg">
+                <button data-agg="avg" class="active">Ø</button>
+                <button data-agg="max">Max</button>
+              </div>
+              <span class="muted" id="statsSource"></span>
+              <div class="spacer"></div>
+              <span class="muted" id="statsInfo"></span>
+            </div>
+            <div class="grid-2">
+              <div class="card chart-card"><h3>CPU</h3><canvas id="chartCpu"></canvas></div>
+              <div class="card chart-card"><h3>Arbeitsspeicher</h3><canvas id="chartMem"></canvas></div>
+              <div class="card chart-card"><h3 id="chartNetTitle">Netzwerk</h3><canvas id="chartNet"></canvas></div>
+              <div class="card chart-card" id="diskCard"><h3>Datenträger</h3><canvas id="chartDisk"></canvas></div>
+              <div class="card hidden" id="availCard">
+                <h3>Verfügbarkeit</h3>
+                <div class="avail-grid" id="availGrid"></div>
+                <h3 class="mt">Letzte Ausfälle</h3>
+                <div id="incidentList" class="incident-list"></div>
+              </div>
+            </div>
+            <div class="tooltip hidden" id="chartTip"></div>
+          </div>
+
+          <!-- Backups -->
+          <div class="tab hidden" data-panel="backups">
+            <div class="console-bar">
+              <input id="backupDesc" class="input" maxlength="24" placeholder="Beschreibung (optional, max. 24 Zeichen)">
+              <button class="btn btn-primary" id="backupCreate">Backup erstellen</button>
+              <div class="spacer"></div>
+              <button class="btn btn-ghost" id="backupRefresh">Aktualisieren</button>
+            </div>
+            <div class="card table-card">
+              <table class="table">
+                <thead><tr><th>Erstellt</th><th>Beschreibung</th><th>System</th><th>Größe</th><th>Status</th><th></th></tr></thead>
+                <tbody id="backupRows"></tbody>
+              </table>
+            </div>
+          </div>
+
+          <!-- API-Konsole -->
+          <div class="tab hidden" data-panel="terminal">
+            <div class="terminal" id="terminal">
+              <div class="term-out" id="termOut"></div>
+              <form class="term-in" id="termForm" autocomplete="off">
+                <span class="prompt" id="termPrompt">fire&gt;</span>
+                <input id="termInput" spellcheck="false" placeholder="help eingeben…">
+              </form>
+            </div>
+          </div>
+        </div>
+      </section>
+    </main>
+  </div>
+
+  <!-- Modal: Server hinzufügen -->
+  <div class="modal-backdrop hidden" id="addModal">
+    <div class="modal">
+      <div class="modal-head">
+        <h2>Server hinzufügen</h2>
+        <button class="btn btn-icon" data-close>
+          <svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18" stroke="currentColor" stroke-width="2" fill="none"/></svg>
+        </button>
+      </div>
+
+      <div id="addStep1">
+        <label class="field">
+          <span>API-Typ</span>
+          <div class="seg" id="providerSeg">
+            <button data-provider="24fire" class="active" type="button">24fire Kundenkonto</button>
+            <button data-provider="fireapi" type="button">FireAPI (Reseller)</button>
+          </div>
+        </label>
+        <label class="field">
+          <span>API-Token</span>
+          <div class="input-row">
+            <input id="addKey" class="input mono" type="password" placeholder="{id}|cra_…">
+            <button class="btn btn-ghost" id="toggleKey" type="button">Zeigen</button>
+          </div>
+        </label>
+        <label class="field hidden" id="envField">
+          <span>Umgebung</span>
+          <div class="seg" id="envSeg">
+            <button data-env="live" class="active" type="button">Live</button>
+            <button data-env="sandbox" type="button">Sandbox</button>
+          </div>
+        </label>
+        <p class="hint" id="providerHint"></p>
+        <div class="error hidden" id="addError"></div>
+        <div class="modal-foot">
+          <button class="btn btn-ghost" data-close type="button">Abbrechen</button>
+          <button class="btn btn-primary" id="addProbe" type="button">Verbinden</button>
+        </div>
+      </div>
+
+      <div id="addStep2" class="hidden">
+        <p class="hint" id="vmFoundText"></p>
+        <ul class="vm-pick" id="vmPick"></ul>
+        <details class="manual" id="manualBox">
+          <summary id="manualSummary">Server-ID manuell eintragen</summary>
+          <div class="input-row">
+            <input id="manualVmid" class="input mono" placeholder="internal_id">
+            <input id="manualName" class="input" placeholder="Name (optional)">
+          </div>
+        </details>
+        <div class="error hidden" id="addError2"></div>
+        <div class="modal-foot">
+          <button class="btn btn-ghost" id="addBack" type="button">Zurück</button>
+          <button class="btn btn-primary" id="addConfirm" type="button">Hinzufügen</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Modal: Bestätigen / Eingabe -->
+  <div class="modal-backdrop hidden" id="dialog">
+    <div class="modal modal-sm">
+      <h2 id="dialogTitle"></h2>
+      <p id="dialogText" class="hint"></p>
+      <input id="dialogInput" class="input hidden">
+      <div class="modal-foot">
+        <button class="btn btn-ghost" id="dialogCancel">Abbrechen</button>
+        <button class="btn btn-primary" id="dialogOk">OK</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Editor (Dateien & Nginx) -->
+  <div class="modal-backdrop hidden" id="editor">
+    <div class="modal editor-modal">
+      <div class="editor-head">
+        <div class="editor-title">
+          <span class="dirty hidden" id="edDirty" title="Ungespeicherte Änderungen"></span>
+          <span class="mono" id="edPath"></span>
+        </div>
+        <span class="muted" id="edInfo"></span>
+      </div>
+      <div class="editor-body">
+        <pre class="editor-gutter" id="edGutter"></pre>
+        <textarea id="edText" spellcheck="false" wrap="off"></textarea>
+      </div>
+      <pre class="editor-error hidden" id="edError"></pre>
+      <div class="modal-foot">
+        <span class="muted editor-hint">Strg+S speichern · Tab rückt ein</span>
+        <div class="spacer"></div>
+        <button class="btn btn-ghost hidden" id="edRevert">Änderung zurücknehmen</button>
+        <button class="btn btn-ghost" id="edClose">Schließen</button>
+        <button class="btn btn-primary" id="edSave">Speichern</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Neue Nginx-Site -->
+  <div class="modal-backdrop hidden" id="ngxNewModal">
+    <div class="modal">
+      <div class="modal-head">
+        <h2>Neue Nginx-Site</h2>
+        <button class="btn btn-icon" data-close-ngx>
+          <svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18" stroke="currentColor" stroke-width="2" fill="none"/></svg>
+        </button>
+      </div>
+      <label class="field">
+        <span>Domain(s)</span>
+        <input id="nsDomains" class="input mono" placeholder="example.de www.example.de">
+      </label>
+      <label class="field">
+        <span>Typ</span>
+        <div class="seg" id="nsType">
+          <button data-type="proxy" class="active" type="button">Reverse Proxy</button>
+          <button data-type="static" type="button">Statische Website</button>
+          <button data-type="php" type="button">PHP</button>
+        </div>
+      </label>
+      <label class="field" id="nsUpstreamField">
+        <span>Weiterleiten an</span>
+        <input id="nsUpstream" class="input mono" value="http://127.0.0.1:3000">
+      </label>
+      <label class="field hidden" id="nsRootField">
+        <span>Webroot</span>
+        <input id="nsRoot" class="input mono" placeholder="/var/www/example.de">
+      </label>
+      <label class="check"><input type="checkbox" id="nsWebsocket" checked> WebSocket-Unterstützung</label>
+      <label class="check"><input type="checkbox" id="nsEnable" checked> Direkt aktivieren und Nginx neu laden</label>
+      <p class="hint">Die Datei wird unter <span class="mono" id="nsTarget">…</span> angelegt. Vor dem Neuladen prüft <span class="mono">nginx -t</span> die Konfiguration – bei Fehlern wird die Site wieder deaktiviert.</p>
+      <div class="error hidden" id="nsError"></div>
+      <div class="modal-foot">
+        <button class="btn btn-ghost" data-close-ngx type="button">Abbrechen</button>
+        <button class="btn btn-primary" id="nsCreate" type="button">Anlegen</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Claude-Zugriff (MCP) -->
+  <div class="modal-backdrop hidden" id="claudeModal">
+    <div class="modal claude-modal">
+      <div class="modal-head">
+        <div class="claude-title">
+          <svg viewBox="0 0 24 24" class="claude-ic big"><path d="M12 2l2.2 6.8L21 11l-6.8 2.2L12 20l-2.2-6.8L3 11l6.8-2.2z"/></svg>
+          <div>
+            <h2>Claude-Zugriff</h2>
+            <div class="muted">Gib Claude Code und anderen KI-Agenten per MCP Zugriff auf deine Server.</div>
+          </div>
+        </div>
+        <div class="claude-head-right">
+          <span class="pill pill-muted" id="cmStatus">Aus</span>
+          <label class="toggle big" title="MCP-Server an/aus"><input type="checkbox" id="cmEnabled"><span></span></label>
+          <button class="btn btn-icon" data-close-claude>
+            <svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18" stroke="currentColor" stroke-width="2" fill="none"/></svg>
+          </button>
+        </div>
+      </div>
+
+      <div class="notice hidden" id="cmNotice"></div>
+      <div class="claude-body">
+        <div class="claude-col">
+          <section class="card">
+            <h3>Verbindung</h3>
+            <dl class="kv cm-kv">
+              <dt>Adresse</dt><dd><span class="mono" id="cmUrl"></span><button class="copy" data-cm-copy="url">⧉</button></dd>
+              <dt>Token</dt>
+              <dd>
+                <span class="mono" id="cmToken">••••••••••••</span>
+                <button class="copy" id="cmShowToken">Zeigen</button>
+                <button class="copy" data-cm-copy="token">⧉</button>
+                <button class="copy" id="cmRegen">Neu erzeugen</button>
+              </dd>
+              <dt>Port</dt><dd><input id="cmPort" class="input mono cm-port" inputmode="numeric"></dd>
+            </dl>
+            <h3 class="mt">In Claude Code eintragen</h3>
+            <div class="cm-cmd">
+              <code id="cmCmd"></code>
+              <button class="copy" data-cm-copy="cmd">⧉</button>
+            </div>
+            <div class="cm-actions">
+              <button class="btn btn-primary" id="cmRegister">Automatisch in Claude Code eintragen</button>
+            </div>
+            <p class="hint">Danach Claude Code neu starten. Prüfen mit <span class="mono">claude mcp list</span> bzw. <span class="mono">/mcp</span>.
+              Andere MCP-Clients: Streamable-HTTP-URL oben + Header <span class="mono">Authorization: Bearer &lt;Token&gt;</span>.</p>
+            <div class="error hidden" id="cmError"></div>
+          </section>
+
+          <section class="card">
+            <h3>Sicherheit</h3>
+            <label class="check"><input type="checkbox" id="cmConfirm"> Riskante Aktionen hier in der App bestätigen (empfohlen)</label>
+            <p class="hint">Betrifft: Server stoppen/neu starten, Backup erstellen, Shell-Befehle, Dateien schreiben/löschen, Nginx neu laden.
+              Der Server lauscht nur auf 127.0.0.1 – andere Rechner im Netz kommen nicht dran. Das Passwort deiner Server bekommt Claude nie zu sehen.</p>
+          </section>
+        </div>
+
+        <div class="claude-col">
+          <section class="card">
+            <h3>Zugriff pro Server</h3>
+            <div class="cm-servers" id="cmServers"></div>
+            <div class="cm-legend">
+              <div><b>Nur lesen</b> – Status, Konfiguration, Monitoring, Backups ansehen</div>
+              <div><b>Steuern</b> – zusätzlich Start/Stop/Neustart, Backups erstellen</div>
+              <div><b>Voll (SSH)</b> – zusätzlich Dateien lesen/schreiben, Shell-Befehle, Nginx</div>
+            </div>
+          </section>
+
+          <section class="card cm-log-card">
+            <div class="cm-log-head">
+              <h3>Aktivität</h3>
+              <button class="btn btn-sm btn-ghost" id="cmOpenAudit">Vollständiges Protokoll</button>
+            </div>
+            <div class="cm-log" id="cmLog"></div>
+          </section>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Discord-Status -->
+  <div class="modal-backdrop hidden" id="discordModal">
+    <div class="modal claude-modal">
+      <div class="modal-head">
+        <div class="claude-title">
+          <svg viewBox="0 0 24 24" class="discord-ic big"><path d="M19.6 5.3A16.5 16.5 0 0 0 15.5 4l-.5 1a15 15 0 0 0-6 0l-.5-1a16.5 16.5 0 0 0-4.1 1.3C1.8 9.2 1.1 13 1.4 16.7A16.6 16.6 0 0 0 6.5 19.3l1-1.6c-.6-.2-1.1-.5-1.6-.8l.4-.3a11.8 11.8 0 0 0 11.4 0l.4.3c-.5.3-1 .6-1.6.8l1 1.6a16.5 16.5 0 0 0 5.1-2.6c.4-4.3-.6-8-2.9-11.4zM8.7 14.5c-1 0-1.8-.9-1.8-2s.8-2 1.8-2 1.8.9 1.8 2-.8 2-1.8 2zm6.6 0c-1 0-1.8-.9-1.8-2s.8-2 1.8-2 1.8.9 1.8 2-.8 2-1.8 2z"/></svg>
+          <div>
+            <h2>Discord-Status</h2>
+            <div class="muted">Zeigt Live-Stats deines Servers als Rich Presence in deinem Discord-Profil.</div>
+          </div>
+        </div>
+        <div class="claude-head-right">
+          <span class="pill pill-muted" id="dcStatus">Aus</span>
+          <label class="toggle big" title="Discord-Status an/aus"><input type="checkbox" id="dcEnabled"><span></span></label>
+          <button class="btn btn-icon" data-close-discord>
+            <svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18" stroke="currentColor" stroke-width="2" fill="none"/></svg>
+          </button>
+        </div>
+      </div>
+
+      <div class="claude-body">
+        <div class="claude-col">
+          <section class="card">
+            <h3>Bild</h3>
+            <p class="hint dc-setup">Das große Bild kommt aus der Discord-Application von Fire Desktop. Dort muss unter
+              <b>Rich Presence → Art Assets</b> das Bild <span class="mono">Fire Desktop Icon.png</span> (liegt auf deinem Desktop)
+              mit dem Namen <span class="mono">fire_desktop</span> hochgeladen sein – <a href="#" id="dcPortal">Developer Portal öffnen</a>.
+              Nach dem Hochladen dauert es ein paar Minuten, bis Discord es anzeigt.</p>
+          </section>
+
+          <section class="card">
+            <h3>Inhalt</h3>
+            <div class="dc-grid">
+              <label class="field"><span>Server</span><select id="dcServer" class="input"></select></label>
+              <label class="field"><span>Anzeige als</span>
+                <select id="dcType" class="input">
+                  <option value="0">Spielt …</option>
+                  <option value="3">Schaut …</option>
+                  <option value="2">Hört …</option>
+                  <option value="5">Tritt an in …</option>
+                </select>
+              </label>
+            </div>
+            <label class="field"><span>Zeile 1 (Details)</span><input id="dcDetails" class="input dc-tpl" data-key="details"></label>
+            <label class="field"><span>Zeile 2 (Status)</span><input id="dcState" class="input dc-tpl" data-key="state"></label>
+            <div class="dc-chips" id="dcChips"></div>
+            <div class="dc-grid">
+              <label class="field"><span>Großes Bild (Asset-Name)</span><input id="dcLargeImage" class="input mono dc-tpl" data-key="largeImage"></label>
+              <label class="field"><span>Text beim Drüberfahren</span><input id="dcLargeText" class="input dc-tpl" data-key="largeText"></label>
+              <label class="field"><span>Kleines Bild (optional)</span><input id="dcSmallImage" class="input mono dc-tpl" data-key="smallImage" placeholder="Asset-Name"></label>
+              <label class="field"><span>Text kleines Bild</span><input id="dcSmallText" class="input dc-tpl" data-key="smallText"></label>
+            </div>
+            <label class="field"><span>Zeit anzeigen</span>
+              <select id="dcTimer" class="input">
+                <option value="uptime">Laufzeit des Servers („seit 2:13:05“)</option>
+                <option value="app">Seit Fire Desktop läuft</option>
+                <option value="none">Keine Zeit</option>
+              </select>
+            </label>
+            <h3 class="mt">Buttons (optional, max. 2)</h3>
+            <div class="dc-grid">
+              <input id="dcB1Label" class="input dc-btn" placeholder="Beschriftung, z. B. Zum Server">
+              <input id="dcB1Url" class="input mono dc-btn" placeholder="https://…">
+              <input id="dcB2Label" class="input dc-btn" placeholder="Beschriftung">
+              <input id="dcB2Url" class="input mono dc-btn" placeholder="https://…">
+            </div>
+            <p class="hint">Buttons sieht man nur bei anderen – im eigenen Profil zeigt Discord sie nicht an.</p>
+          </section>
+        </div>
+
+        <div class="claude-col">
+          <section class="card">
+            <h3>Vorschau</h3>
+            <div class="dc-preview">
+              <div class="dc-label" id="dcPvType">SPIELT</div>
+              <div class="dc-row">
+                <div class="dc-art">
+                  <img src="../../build/icon.png" alt="">
+                  <span class="dc-small hidden" id="dcPvSmall"></span>
+                </div>
+                <div class="dc-text">
+                  <div class="dc-app" id="dcPvApp">Fire Desktop</div>
+                  <div id="dcPvDetails"></div>
+                  <div id="dcPvState"></div>
+                  <div class="dc-time" id="dcPvTime"></div>
+                </div>
+              </div>
+              <div class="dc-buttons" id="dcPvButtons"></div>
+            </div>
+            <p class="hint">Live-Werte, alle 15 s aktualisiert. Der Name oben ist der Name deiner Discord-Application.</p>
+          </section>
+          <section class="card">
+            <h3>Platzhalter</h3>
+            <div class="dc-ph" id="dcPlaceholders"></div>
+          </section>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Claude-Protokoll -->
+  <div class="modal-backdrop hidden" id="auditModal">
+    <div class="modal claude-modal audit-modal">
+      <div class="modal-head">
+        <div class="claude-title">
+          <svg viewBox="0 0 24 24" class="claude-ic big"><path d="M12 2l2.2 6.8L21 11l-6.8 2.2L12 20l-2.2-6.8L3 11l6.8-2.2z"/></svg>
+          <div>
+            <h2>Claude-Protokoll</h2>
+            <div class="muted">Alles, was Claude über Fire Desktop auf deinen Servern abgefragt oder ausgeführt hat – dauerhaft gespeichert.</div>
+          </div>
+        </div>
+        <button class="btn btn-icon" data-close-audit>
+          <svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18" stroke="currentColor" stroke-width="2" fill="none"/></svg>
+        </button>
+      </div>
+      <div class="audit-bar">
+        <input id="auSearch" class="input" placeholder="Suchen (Befehl, Pfad, Ausgabe …)">
+        <select id="auServer" class="input au-select"></select>
+        <label class="check"><input type="checkbox" id="auChanges"> Nur Änderungen</label>
+        <div class="spacer"></div>
+        <button class="btn btn-ghost" id="auExport">Exportieren</button>
+        <button class="btn btn-danger" id="auClear">Leeren</button>
+      </div>
+      <div class="audit-stats muted" id="auStats"></div>
+      <div class="audit-list" id="auList"></div>
+    </div>
+  </div>
+
+  <!-- Bestätigung einer Claude-Aktion -->
+  <div class="modal-backdrop hidden" id="claudeConfirm">
+    <div class="modal claude-confirm">
+      <div class="cc-head">
+        <svg viewBox="0 0 24 24" class="claude-ic big"><path d="M12 2l2.2 6.8L21 11l-6.8 2.2L12 20l-2.2-6.8L3 11l6.8-2.2z"/></svg>
+        <div>
+          <h2>Claude möchte eine Aktion ausführen</h2>
+          <div class="muted" id="ccServer"></div>
+        </div>
+      </div>
+      <div class="cc-summary" id="ccSummary"></div>
+      <pre class="cc-details hidden" id="ccDetails"></pre>
+      <div class="muted cc-timer" id="ccTimer"></div>
+      <div class="modal-foot">
+        <button class="btn btn-ghost" id="ccDeny">Ablehnen</button>
+        <button class="btn btn-primary" id="ccAllow">Erlauben</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Minecraft-Server hinzufügen / bearbeiten -->
+  <div class="modal-backdrop hidden" id="mcModal">
+    <div class="modal">
+      <div class="modal-head">
+        <h2 id="mcModalTitle">Minecraft-Server hinzufügen</h2>
+        <button class="btn btn-icon" data-close-mc>
+          <svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18" stroke="currentColor" stroke-width="2" fill="none"/></svg>
+        </button>
+      </div>
+      <label class="field"><span>Name</span><input id="mcfName" class="input" placeholder="z. B. NNN Survival"></label>
+      <label class="field">
+        <span>Verbindung</span>
+        <div class="seg" id="mcfVia">
+          <button data-via="ssh" type="button" class="active">Über SSH-Tunnel (empfohlen)</button>
+          <button data-via="direct" type="button">Direkt</button>
+        </div>
+      </label>
+      <label class="field" id="mcfSshField"><span>Läuft auf diesem 24fire-Server</span><select id="mcfSsh" class="input"></select></label>
+      <label class="field" id="mcfHostField"><span>Adresse (IP oder Domain)</span><input id="mcfHost" class="input mono" placeholder="nnn-server.fojadrachi.de"></label>
+      <div class="dc-grid">
+        <label class="field"><span>Spiel-Port</span><input id="mcfGame" class="input mono" value="25565" inputmode="numeric"></label>
+        <label class="field"><span>RCON-Port</span><input id="mcfRcon" class="input mono" value="25575" inputmode="numeric"></label>
+      </div>
+      <label class="field"><span>RCON-Passwort</span><input id="mcfPass" class="input mono" type="password" placeholder="rcon.password aus server.properties"></label>
+      <p class="hint" id="mcfHint"></p>
+      <div class="mc-test hidden" id="mcfTest"></div>
+      <div class="error hidden" id="mcfError"></div>
+      <div class="modal-foot">
+        <button class="btn btn-ghost" id="mcfTestBtn" type="button">Verbindung testen</button>
+        <div class="spacer"></div>
+        <button class="btn btn-ghost" data-close-mc type="button">Abbrechen</button>
+        <button class="btn btn-primary" id="mcfSave" type="button">Speichern</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- App-Update -->
+  <div class="modal-backdrop hidden" id="updateModal">
+    <div class="modal">
+      <div class="modal-head">
+        <h2 id="upTitle">Update verfügbar</h2>
+        <button class="btn btn-icon" data-close-update>
+          <svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18" stroke="currentColor" stroke-width="2" fill="none"/></svg>
+        </button>
+      </div>
+      <p class="hint" id="upInfo"></p>
+      <pre class="up-notes hidden" id="upNotes"></pre>
+      <div class="tp-bar hidden" id="upBar"><span></span></div>
+      <div class="muted up-status" id="upStatus"></div>
+      <div class="error hidden" id="upError"></div>
+      <div class="modal-foot">
+        <button class="btn btn-ghost" data-close-update type="button">Später</button>
+        <button class="btn btn-primary" id="upInstall" type="button">Jetzt aktualisieren</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Übertragungen -->
+  <div class="transfer-panel hidden" id="transferPanel">
+    <div class="tp-head" id="tpToggle">
+      <span id="tpCount">Übertragungen</span>
+      <span class="tp-chev">▾</span>
+    </div>
+    <div class="tp-list" id="tpList"></div>
+  </div>
+
+  <div class="toasts" id="toasts"></div>
+
+  <script src="../../node_modules/@xterm/xterm/lib/xterm.js"></script>
+  <script src="../../node_modules/@xterm/addon-fit/lib/addon-fit.js"></script>
+  <script src="charts.js"></script>
+  <script src="app.js"></script>
+  <script src="remote.js"></script>
+  <script src="claude.js"></script>
+  <script src="discord.js"></script>
+  <script src="minecraft.js"></script>
+  <script src="update.js"></script>
+</body>
+</html>

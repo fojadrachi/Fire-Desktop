@@ -1,0 +1,81 @@
+<!doctype html>
+<html lang="de">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Datenschutzerklärung – Fire Desktop</title>
+  <style>
+    :root { --bg: #0b0d12; --panel: #151922; --line: #262c39; --text: #e8ebf2; --muted: #8b93a7; --fire: #ff6a2b; }
+    @media (prefers-color-scheme: light) { :root { --bg: #f7f7f9; --panel: #fff; --line: #e3e5ea; --text: #1b1e25; --muted: #5b6272; } }
+    * { box-sizing: border-box; }
+    body { margin: 0; background: var(--bg); color: var(--text); font: 15px/1.65 "Segoe UI", system-ui, sans-serif; }
+    main { max-width: 780px; margin: 0 auto; padding: 40px 20px 60px; }
+    h1 { font-size: 28px; margin: 0 0 4px; }
+    h2 { font-size: 18px; margin: 32px 0 8px; padding-top: 8px; border-top: 1px solid var(--line); }
+    .meta { color: var(--muted); margin-bottom: 24px; }
+    .box { background: var(--panel); border: 1px solid var(--line); border-left: 3px solid var(--fire); border-radius: 10px; padding: 12px 16px; }
+    code { font-family: Consolas, monospace; font-size: 13.5px; }
+    a { color: var(--fire); }
+    ul { padding-left: 20px; }
+  </style>
+</head>
+<body>
+<main>
+  <h1>Datenschutzerklärung</h1>
+  <div class="meta">Fire Desktop · Stand: 30. Oktober 2026</div>
+
+  <div class="box">
+    <b>Kurz gesagt:</b> Fire Desktop ist eine Desktop-App, die vollständig auf deinem Computer läuft. Es gibt keine
+    Fire-Desktop-Server, keine Konten, keine Werbung, kein Tracking und keine Analyse. Daten werden nur an die Dienste
+    übertragen, die du selbst einrichtest und benutzt (24fire, deine eigenen Server, optional Discord und Claude).
+  </div>
+
+  <h2>1. Verantwortlicher</h2>
+  <p>Fojadrachi<br>
+    Kontakt: <a href="mailto:KONTAKT-EMAIL-EINTRAGEN">KONTAKT-EMAIL-EINTRAGEN</a></p>
+
+  <h2>2. Welche Daten die App verarbeitet</h2>
+  <ul>
+    <li><b>API-Keys</b> für die 24fire-API bzw. FireAPI, die du eingibst. Sie werden ausschließlich lokal in
+      <code>%APPDATA%\Fire Desktop\servers.json</code> gespeichert und mit der Windows-Datenverschlüsselung (DPAPI)
+      an dein Windows-Benutzerkonto gebunden.</li>
+    <li><b>Server-Daten</b>, die über die 24fire-API abgerufen werden (Status, Konfiguration, IP-Adressen, Zugangsdaten,
+      Monitoring, Traffic, Backups). Sie werden nur angezeigt und nicht dauerhaft gespeichert.</li>
+    <li><b>SSH-Fingerabdrücke</b> deiner Server (zum Schutz vor Man-in-the-Middle-Angriffen) und, nach erfolgreicher Anmeldung, das SSH-Passwort – lokal und verschlüsselt gespeichert.</li>
+    <li><b>Einstellungen</b> (Servernamen, Claude-Zugriff, Discord-Status), lokal gespeichert.</li>
+  </ul>
+  <p>Fire Desktop erhebt keine Nutzungsstatistiken, Absturzberichte oder sonstige Telemetrie.</p>
+
+  <h2>3. Datenübertragungen an Dritte</h2>
+  <ul>
+    <li><b>24fire GmbH</b> (<code>api.24fire.de</code>) bzw. <b>FireAPI</b> (<code>live.fireapi.de</code>): Die App sendet deine
+      Anfragen mit deinem API-Key direkt an diese Schnittstellen, um deine Server zu verwalten. Es gilt die
+      Datenschutzerklärung von 24fire.</li>
+    <li><b>GitHub</b>: Die App fragt beim Start die neueste Version bei <code>api.github.com</code> ab und lädt Updates von
+      GitHub. Dabei werden keine Daten aus der App übertragen; GitHub sieht technisch bedingt deine IP-Adresse.</li>
+    <li><b>Deine eigenen Server</b>: Konsole, Dateimanager und Nginx-Verwaltung verbinden sich per SSH/SFTP direkt mit deinen Servern.</li>
+    <li><b>Discord</b> (nur wenn du den Discord-Status einschaltest): Die App übergibt dem lokal laufenden Discord-Client
+      die von dir gewählten Status-Texte (z. B. Servername, CPU-/RAM-Werte, Laufzeit). Discord zeigt diese in deinem Profil
+      anderen Nutzern an. Es gilt die <a href="https://discord.com/privacy">Datenschutzerklärung von Discord</a>.
+      Fire Desktop erhält dabei von Discord nur deinen Anzeigenamen zur Anzeige „Verbunden als …“ und speichert ihn nicht.</li>
+    <li><b>Claude / KI-Agenten</b> (nur wenn du den Claude-Zugriff einschaltest): Die App stellt eine Schnittstelle
+      ausschließlich auf deinem Rechner (<code>127.0.0.1</code>) bereit. Ein KI-Programm wie Claude Code, das du selbst
+      verbindest, kann darüber Daten der von dir freigegebenen Server abrufen; diese Daten werden dann vom jeweiligen
+      KI-Anbieter verarbeitet (bei Claude: Anthropic, siehe dessen Datenschutzerklärung). Server-Passwörter werden dabei nie weitergegeben.</li>
+  </ul>
+
+  <h2>4. Speicherdauer und Löschung</h2>
+  <p>Alle Daten bleiben auf deinem Computer, bis du sie löschst – über „Server entfernen“ in der App oder durch Löschen
+    des Ordners <code>%APPDATA%\Fire Desktop</code>. Das Aktivitätsprotokoll des Claude-Zugriffs wird nur im Arbeitsspeicher
+    gehalten und beim Beenden verworfen.</p>
+
+  <h2>5. Deine Rechte</h2>
+  <p>Da Fire Desktop selbst keine personenbezogenen Daten auf eigenen Servern speichert, liegen alle Daten in deiner
+    Verfügung. Du hast im Übrigen die Rechte aus der DSGVO (Auskunft, Berichtigung, Löschung, Einschränkung,
+    Widerspruch, Beschwerde bei einer Aufsichtsbehörde). Für Daten bei 24fire, Discord oder Anthropic wende dich an den jeweiligen Anbieter.</p>
+
+  <h2>6. Änderungen</h2>
+  <p>Diese Erklärung kann angepasst werden, wenn sich die App ändert. Es gilt die jeweils mit der App bzw. unter dieser Adresse veröffentlichte Fassung.</p>
+</main>
+</body>
+</html>
