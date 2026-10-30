@@ -6,7 +6,7 @@ use anyhow::{anyhow, bail, Result};
 use russh_sftp::client::SftpSession;
 use serde_json::Value;
 use slint::{Color, ComponentHandle, Model, ModelRc, SharedString, VecModel, Weak};
-use std::collections::{HashMap, HashSet};
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::path::PathBuf;
 use std::sync::atomic::Ordering;
 use std::sync::{Arc, Mutex, OnceLock};
@@ -98,6 +98,8 @@ struct App {
 }
 
 static STATE: OnceLock<Mutex<App>> = OnceLock::new();
+const LIVE_POINTS: usize = 120; // bei 10 Sekunden Abstand rund 20 Minuten
+static LIVE: OnceLock<Mutex<HashMap<String, VecDeque<(f64, f64, u64)>>>> = OnceLock::new();
 fn st() -> std::sync::MutexGuard<'static, App> { STATE.get_or_init(|| Mutex::new(App::default())).lock().unwrap() }
 fn active() -> Option<store::Server> { store::server(&st().active) }
 
@@ -240,6 +242,16 @@ async fn refresh(with_config: bool) {
         a.status.insert(id, res);
         if cfg.is_some() { a.cfg = cfg.clone(); }
         if tr.is_some() { a.traffic = tr; }
+        if let Some(Ok(t)) = a.status.get(&srv.id) {
+            let (cpu, mem) = if t.running { (t.cpu, t.mem_gb(a.cfg.as_ref().map(|c| c.mem_mb).unwrap_or(0.0))) } else { (0.0, 0.0) };
+            let mut live = LIVE.get_or_init(Default::default).lock().unwrap();
+            let v = live.entry(srv.id.clone()).or_default();
+            // 24fire erneuert /status nur etwa alle 10 Sekunden, doppelte Abrufe nicht aufzeichnen
+            if !t.running || v.back().map(|x| x.2) != Some(t.uptime) {
+                v.push_back((cpu, mem, t.uptime));
+                if v.len() > LIVE_POINTS { v.pop_front(); }
+            }
+        }
     }
     if let Some(c) = cfg {
         let saved = srv.saved_ssh().unwrap_or_default();
@@ -250,7 +262,7 @@ async fn refresh(with_config: bool) {
             sync_creds(&s);
         });
     }
-    ui(|_, s| { side_servers(&s); render_server(&s); });
+    ui(|_, s| { side_servers(&s); render_server(&s); render_live(&s); });
 }
 
 fn select_server(id: String) {
@@ -281,6 +293,7 @@ fn select_server(id: String) {
         s.set_host(model(vec![]));
         for f in [S::set_cpu, S::set_ram, S::set_disk, S::set_traffic] { f(&s, "–".into()); }
         render_server(&s);
+        render_live(&s);
         load_tab(s.get_tab());
     });
     spawn(refresh(true));
@@ -768,6 +781,23 @@ fn chart(values: &[f64], max: f64) -> String {
     values.iter().enumerate().map(|(i, v)| format!("{} {:.1} {:.1}", if i == 0 { "M" } else { "L" }, i as f64 / n * 1000.0, 195.0 - (v / max).clamp(0.0, 1.0) * 190.0)).collect::<Vec<_>>().join(" ")
 }
 
+/// Live-Kurve: der neueste Wert steht rechts, ältere wandern nach links aus dem Bild.
+fn chart_live(values: &[f64], max: f64) -> String {
+    if values.len() < 2 || max <= 0.0 { return String::new(); }
+    let n = values.len();
+    values.iter().enumerate().map(|(i, v)| format!("{} {:.1} {:.1}", if i == 0 { "M" } else { "L" }, 1000.0 - (n - 1 - i) as f64 / (LIVE_POINTS - 1) as f64 * 1000.0, 195.0 - (v / max).clamp(0.0, 1.0) * 190.0)).collect::<Vec<_>>().join(" ")
+}
+
+fn render_live(s: &S<'_>) {
+    let active = st().active.clone();
+    let (cpu, mem): (Vec<f64>, Vec<f64>) = LIVE.get_or_init(Default::default).lock().unwrap().get(&active).map(|v| v.iter().map(|x| (x.0, x.1)).unzip()).unwrap_or_default();
+    let top = |v: &[f64]| v.iter().cloned().fold(0.0, f64::max);
+    s.set_live_cpu(ss(chart_live(&cpu, top(&cpu).max(10.0) * 1.1)));
+    s.set_live_mem(ss(chart_live(&mem, top(&mem).max(1.0) * 1.1)));
+    s.set_live_cpu_now(ss(cpu.last().map(|v| format!("{v:.1} %")).unwrap_or_default()));
+    s.set_live_mem_now(ss(mem.last().map(|v| format!("{v:.2} GB")).unwrap_or_default()));
+}
+
 async fn load_stats() {
     let Some(srv) = active() else { return };
     let m = match fire::monitoring(&srv).await {
@@ -780,7 +810,7 @@ async fn load_stats() {
     let top = |v: &[f64]| v.iter().cloned().fold(0.0, f64::max);
     let (cm, mm, pm) = (top(&cpu).max(10.0) * 1.1, top(&mem).max(1.0) * 1.1, top(&ping).max(10.0) * 1.1);
     let (cp, mp, pp) = (chart(&cpu, cm), chart(&mem, mm), chart(&ping, pm));
-    let info = format!("{} Messpunkte · Messung alle 10 Minuten", m.timings.len());
+    let info = format!("Live etwa alle 10 Sekunden · Verlauf: {} Messpunkte, 24fire misst alle 10 Minuten · geladen {}", m.timings.len(), chrono::Local::now().format("%H:%M:%S"));
     ui(move |_, s| {
         s.set_chart_cpu(ss(cp)); s.set_chart_mem(ss(mp)); s.set_chart_ping(ss(pp));
         s.set_chart_cpu_max(ss(format!("max. {cm:.0} %"))); s.set_chart_mem_max(ss(format!("max. {mm:.1} GB"))); s.set_chart_ping_max(ss(format!("max. {pm:.0} ms")));
@@ -1825,6 +1855,7 @@ pub fn run(app: &AppWindow) {
                 });
             }
             if tick % 17 == 0 { refresh(false).await; }
+            if tick % 200 == 0 { ui(|_, s| if s.get_tab() == 4 && s.get_active_mc().is_empty() { spawn(load_stats()); }); }
             if tick % 50 == 0 { let t = ui_active_mc(); if !t.is_empty() { mc_refresh(t).await; } }
             if tick % 100 == 1 {
                 let data = store::read();
@@ -1877,6 +1908,15 @@ async fn tour(dir: String) {
     });
     wait(3000).await;
     shot("r1-overview", dir.clone());
+    // Gegen die echte API: nur lesen, kein SSH
+    if std::env::var("FIRE_READONLY").is_ok() {
+        ui(|_, s| { s.set_tab(4); s.invoke_tab_changed(4); });
+        wait(45_000).await;
+        ui(|_, s| println!("TEST live: {} {} | {}", s.get_live_cpu_now(), s.get_live_mem_now(), s.get_stats_info()));
+        shot("r5c-real", dir.clone());
+        wait(500).await;
+        std::process::exit(0);
+    }
     ui(|_, s| { s.set_srv_pass_show(true); });
     wait(100).await;
     ui(|_, s| { s.set_tab(1); });
@@ -1899,6 +1939,13 @@ async fn tour(dir: String) {
     shot("r1b-password", dir.clone());
     ui(|_, s| { s.set_tab(1); });
     wait(300).await;
+    if std::env::var("FIRE_STATS").is_ok() {
+        ui(|_, s| { s.set_tab(4); s.invoke_tab_changed(4); });
+        wait(130_000).await;
+        ui(|_, s| println!("TEST live: {} {} | {}", s.get_live_cpu_now(), s.get_live_mem_now(), s.get_stats_info()));
+        shot("r5b-live", dir.clone());
+        wait(500).await;
+    }
     for (i, name) in [(2, "r3-files"), (3, "r4-nginx"), (4, "r5-stats"), (5, "r6-backups")] {
         ui(move |_, s| { s.set_tab(i); s.invoke_tab_changed(i); });
         wait(2500).await;

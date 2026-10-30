@@ -1,6 +1,6 @@
 [package]
 name = "fire-desktop"
-version = "2.1.0"
+version = "2.1.1"
 edition = "2021"
 description = "Fire Desktop – 24fire-KVM-Server verwalten"
 license = "UNLICENSED"

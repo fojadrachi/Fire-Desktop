@@ -350,6 +350,7 @@ component Chart inherits Card {
     in property <string> path;
     in property <string> top;
     in property <color> tint: Theme.acc;
+    in property <string> empty: "Keine Daten";
     height: 210px;
     VerticalLayout {
         padding: 14px;
@@ -373,25 +374,33 @@ component Chart inherits Card {
                 stroke-width: 2px;
                 fill: transparent;
             }
-            if path == "": Text { text: "Keine Daten"; color: Theme.dim; }
+            if path == "": Text { text: empty; color: Theme.dim; }
         }
     }
 }
 
 component StatsTab inherits ScrollView {
+    // Fest halbe Breite, damit Karten ohne Inhalt nicht schrumpfen
+    property <length> half: (self.visible-width - 12px) / 2;
     VerticalLayout {
         spacing: 12px;
         alignment: start;
         Text { text: S.stats-info; color: Theme.mut; font-size: 12px; }
         HorizontalLayout {
             spacing: 12px;
-            Chart { title: "CPU"; path: S.chart-cpu; top: S.chart-cpu-max; }
-            Chart { title: "ARBEITSSPEICHER"; path: S.chart-mem; top: S.chart-mem-max; tint: Theme.blue; }
+            Chart { width: half; title: "CPU LIVE"; path: S.live-cpu; top: S.live-cpu-now; empty: "Sammelt Daten…"; }
+            Chart { width: half; title: "ARBEITSSPEICHER LIVE"; path: S.live-mem; top: S.live-mem-now; empty: "Sammelt Daten…"; tint: Theme.blue; }
         }
         HorizontalLayout {
             spacing: 12px;
-            Chart { title: "PING"; path: S.chart-ping; top: S.chart-ping-max; tint: Theme.good; }
+            Chart { width: half; title: "CPU VERLAUF"; path: S.chart-cpu; top: S.chart-cpu-max; }
+            Chart { width: half; title: "ARBEITSSPEICHER VERLAUF"; path: S.chart-mem; top: S.chart-mem-max; tint: Theme.blue; }
+        }
+        HorizontalLayout {
+            spacing: 12px;
+            Chart { width: half; title: "PING"; path: S.chart-ping; top: S.chart-ping-max; tint: Theme.good; }
             Card {
+                width: half;
                 height: 210px;
                 VerticalLayout {
                     padding: 14px;
