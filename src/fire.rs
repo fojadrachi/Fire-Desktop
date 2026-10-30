@@ -13,10 +13,18 @@ pub fn client() -> &'static reqwest::Client {
             .user_agent(concat!("Fire-Desktop/", env!("CARGO_PKG_VERSION")))
             .connect_timeout(Duration::from_secs(10))
             .timeout(Duration::from_secs(30))
+            // Leitet eine Adresse auf sich selbst um, käme reqwest erst nach zehn Runden mit einem Fehler zurück
+            .redirect(reqwest::redirect::Policy::custom(|a| {
+                let same = a.previous().last().map(|u| u == a.url()).unwrap_or(false);
+                if same || a.previous().len() > 5 { a.stop() } else { a.follow() }
+            }))
             .build()
             .expect("HTTP-Client")
     })
 }
+
+/// Anfang der Meldung, wenn 24fire selbst gestört ist (nicht der Server des Nutzers).
+pub const API_DOWN: &str = "24fire-API gestört";
 
 #[derive(Debug, Clone)]
 pub struct Reply {
@@ -57,12 +65,21 @@ fn friendly(provider: &str, kind: &str, message: &str, status: u16) -> String {
 pub async fn raw(provider: &str, env: &str, key: &str, method: &str, path: &str, form: &[(&str, String)]) -> Result<Reply> {
     let url = format!("{}{}", base(provider, env), path);
     let m = reqwest::Method::from_bytes(method.as_bytes())?;
-    let mut req = client().request(m, url).header("Accept", "application/json");
-    req = if provider == "fireapi" { req.header("X-FIRE-APIKEY", key) } else { req.bearer_auth(key) };
-    if !form.is_empty() {
-        req = if method == "GET" { req.query(form) } else { req.form(form) };
-    }
-    let res = req.send().await.map_err(|e| anyhow!("Netzwerkfehler: {e}"))?;
+    // Nur Lesen wird wiederholt: Bei Power oder Backups könnte die erste Anfrage doch angekommen sein
+    let mut tries = if method == "GET" { 3 } else { 1 };
+    let res = loop {
+        let mut req = client().request(m.clone(), url.clone()).header("Accept", "application/json");
+        req = if provider == "fireapi" { req.header("X-FIRE-APIKEY", key) } else { req.bearer_auth(key) };
+        if !form.is_empty() {
+            req = if method == "GET" { req.query(form) } else { req.form(form) };
+        }
+        let res = req.send().await.map_err(|e| anyhow!("Netzwerkfehler: {e}"))?;
+        let code = res.status().as_u16();
+        tries -= 1;
+        if !(res.status().is_redirection() || matches!(code, 502..=504 | 520..=527)) { break res; }
+        if tries == 0 { bail!("{API_DOWN}: 24fire antwortet gerade fehlerhaft (HTTP {code}). Das liegt nicht an deinem Server, die App versucht es weiter."); }
+        tokio::time::sleep(Duration::from_millis(700)).await;
+    };
     let status = res.status().as_u16();
     let ok = res.status().is_success();
     let text = res.text().await.unwrap_or_default();

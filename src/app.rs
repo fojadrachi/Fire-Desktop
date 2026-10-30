@@ -8,7 +8,7 @@ use serde_json::Value;
 use slint::{Color, ComponentHandle, Model, ModelRc, SharedString, VecModel, Weak};
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::path::PathBuf;
-use std::sync::atomic::Ordering;
+use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::{Arc, Mutex, OnceLock};
 use std::time::{Duration, Instant};
 use tokio::sync::{mpsc, Mutex as AsyncMutex};
@@ -184,7 +184,7 @@ fn render_server(s: &S<'_>) {
     match a.status.get(&a.active) {
         None => { s.set_srv_pill("Lädt…".into()); s.set_srv_pill_kind("".into()); }
         Some(Err(e)) => {
-            s.set_srv_pill("Nicht erreichbar".into());
+            s.set_srv_pill(if e.starts_with(fire::API_DOWN) { fire::API_DOWN.into() } else { "Nicht erreichbar".into() });
             s.set_srv_pill_kind("warn".into());
             s.set_cpu("–".into());
             s.set_srv_meta(ss(e));
@@ -226,10 +226,19 @@ fn render_server(s: &S<'_>) {
     s.set_host(model(keep(vec![kv("Rechenzentrum", cfg.dc.clone()), kv("Standort", cfg.location.clone()), kv("Node", cfg.node.clone()), kv("Prozessor", cfg.cpu_model.clone())])));
 }
 
+const API_HOLD: u32 = 4; // mit den Wiederholungen rund 30 Sekunden
+static API_FAILS: AtomicU32 = AtomicU32::new(0);
+
 async fn refresh(with_config: bool) {
     let Some(srv) = active() else { return };
     let id = srv.id.clone();
     let res = fire::status(&srv).await.map_err(|e| e.to_string());
+    // Kurze API-Aussetzer überbrücken: letzte Werte stehen lassen statt Fehler anzuzeigen
+    match &res {
+        Err(e) if e.starts_with(fire::API_DOWN) && !with_config && st().cfg.is_some() && matches!(st().status.get(&id), Some(Ok(_))) && API_FAILS.fetch_add(1, Ordering::Relaxed) < API_HOLD => return,
+        Ok(_) => API_FAILS.store(0, Ordering::Relaxed),
+        _ => {}
+    }
     if let Err(e) = &res {
         let first = !matches!(st().status.get(&id), Some(Err(_)));
         if first { toast(e.clone(), "err"); }
@@ -1862,6 +1871,7 @@ pub fn run(app: &AppWindow) {
                 let current = st().active.clone();
                 for x in data.servers.iter().filter(|x| x.id != current) {
                     let r = fire::status(x).await.map_err(|e| e.to_string());
+                    if matches!(&r, Err(e) if e.starts_with(fire::API_DOWN)) { continue; }
                     st().status.insert(x.id.clone(), r);
                 }
                 for m in &data.minecraft { mc_refresh(m.id.clone()).await; }
@@ -1911,7 +1921,10 @@ async fn tour(dir: String) {
     // Gegen die echte API: nur lesen, kein SSH
     if std::env::var("FIRE_READONLY").is_ok() {
         ui(|_, s| { s.set_tab(4); s.invoke_tab_changed(4); });
-        wait(45_000).await;
+        for _ in 0..26 {
+            wait(3000).await;
+            ui(|_, s| println!("TEST pill: {} | {}", s.get_srv_pill(), s.get_srv_meta()));
+        }
         ui(|_, s| println!("TEST live: {} {} | {}", s.get_live_cpu_now(), s.get_live_mem_now(), s.get_stats_info()));
         shot("r5c-real", dir.clone());
         wait(500).await;
