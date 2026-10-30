@@ -1,0 +1,292 @@
+// Gemeinsamer Zustand zwischen Rust und Oberfläche
+
+export struct SideItem { id: string, name: string, sub: string, dot: string }
+export struct KV { k: string, v: string }
+export struct FoundItem { sid: string, name: string, spec: string, checked: bool }
+export struct TermRun { text: string, fg: color, bg: color, bold: bool }
+export struct TermRow { runs: [TermRun] }
+export struct FileItem { name: string, is-dir: bool, is-link: bool, size: string, date: string, perms: string, selected: bool }
+export struct SiteItem { file: string, label: string, names: string, enabled: bool, toggle: bool }
+export struct BackupItem { id: string, created: string, description: string, os: string, size: string, status: string, ready: bool }
+export struct TransferItem { id: string, up: bool, label: string, pct: float, info: string, file: string, speed: string, state: string }
+export struct ToastItem { text: string, kind: string }
+export struct AccessItem { id: string, name: string, level: int }
+export struct AuditItem { time: string, tool: string, server: string, summary: string, result: string, kind: string, change: bool, details: string, open: bool }
+export struct IncidentItem { start: string, kind: string, duration: string }
+export struct AvailItem { label: string, value: string, sub: string }
+export struct RuleItem { key: string, label: string, on: bool }
+export struct LineItem { text: string, kind: string }
+
+export global S {
+    // Navigation
+    in-out property <string> active-id;
+    in-out property <string> active-mc;
+    in-out property <int> tab: 0;
+    in-out property <int> mc-tab: 0;
+    in-out property <[SideItem]> servers;
+    in-out property <[SideItem]> mcs;
+    in-out property <string> foot;
+    in-out property <string> version;
+
+    // Kopf
+    in-out property <string> srv-name;
+    in-out property <string> srv-pill;
+    in-out property <string> srv-pill-kind;
+    in-out property <string> srv-task;
+    in-out property <string> srv-meta;
+
+    // Übersicht
+    in-out property <string> cpu;
+    in-out property <float> cpu-v;
+    in-out property <string> ram;
+    in-out property <float> ram-v;
+    in-out property <string> disk;
+    in-out property <float> disk-v;
+    in-out property <string> traffic;
+    in-out property <float> traffic-v;
+    in-out property <[KV]> cfg;
+    in-out property <[KV]> net;
+    in-out property <[KV]> host;
+
+    // Konsole
+    in-out property <[TermRow]> term;
+    in-out property <string> ssh-state: "Nicht verbunden";
+    in-out property <bool> ssh-on;
+    in-out property <bool> ssh-busy;
+    in-out property <bool> ssh-form;
+    in-out property <string> ssh-host;
+    in-out property <string> ssh-port: "22";
+    in-out property <string> ssh-user: "root";
+    in-out property <string> ssh-pass;
+    callback ssh-connect();
+    callback ssh-disconnect();
+    callback ssh-forget();
+    callback open-novnc();
+    callback term-key(string, bool, bool);
+    callback term-paste();
+    callback term-copy();
+    callback term-resize(length, length);
+
+    // Dateien
+    in-out property <bool> remote-on;
+    in-out property <string> remote-error;
+    in-out property <string> fm-path;
+    in-out property <string> fm-filter;
+    in-out property <[FileItem]> files;
+    in-out property <int> fm-selected;
+    callback remote-connect();
+    callback fm-go(string);
+    callback fm-up();
+    callback fm-refresh();
+    callback fm-open(string);
+    callback fm-toggle(string);
+    callback fm-new-folder();
+    callback fm-new-file();
+    callback fm-upload(bool);
+    callback fm-download(string);
+    callback fm-rename(string);
+    callback fm-chmod(string);
+    callback fm-delete(string);
+    callback fm-filter-changed(string);
+
+    // Übertragungen
+    in-out property <[TransferItem]> transfers;
+    callback transfer-cancel(string);
+
+    // Editor
+    in-out property <bool> ed-open;
+    in-out property <string> ed-path;
+    in-out property <string> ed-text;
+    in-out property <string> ed-msg;
+    in-out property <bool> ed-msg-ok;
+    in-out property <bool> ed-nginx;
+    in-out property <bool> ed-revert;
+    callback ed-save();
+    callback ed-close();
+    callback ed-undo();
+
+    // Nginx
+    in-out property <bool> ngx-installed: true;
+    in-out property <string> ngx-status;
+    in-out property <string> ngx-status-kind;
+    in-out property <string> ngx-version;
+    in-out property <[SiteItem]> sites;
+    in-out property <[SiteItem]> ngx-other;
+    in-out property <string> ngx-output;
+    in-out property <string> ngx-output-title;
+    in-out property <bool> ngx-output-ok;
+    in-out property <bool> ns-open;
+    in-out property <string> ns-domains;
+    in-out property <int> ns-type;
+    in-out property <string> ns-upstream: "http://127.0.0.1:3000";
+    in-out property <string> ns-root;
+    in-out property <bool> ns-ws: true;
+    in-out property <bool> ns-enable: true;
+    in-out property <string> ns-error;
+    callback ngx-action(string);
+    callback ngx-toggle(string, bool);
+    callback ngx-edit(string);
+    callback ngx-delete(string);
+    callback ngx-create();
+
+    // Statistiken
+    in-out property <string> chart-cpu;
+    in-out property <string> chart-mem;
+    in-out property <string> chart-ping;
+    in-out property <string> chart-cpu-max;
+    in-out property <string> chart-mem-max;
+    in-out property <string> chart-ping-max;
+    in-out property <string> stats-info;
+    in-out property <[AvailItem]> avail;
+    in-out property <[IncidentItem]> incidents;
+
+    // Backups
+    in-out property <[BackupItem]> backups;
+    in-out property <string> backup-desc;
+    in-out property <string> backups-info;
+    callback backup-create();
+    callback backup-refresh();
+    callback backup-restore(string);
+    callback backup-delete(string);
+
+    // API-Konsole
+    in-out property <[LineItem]> api-lines;
+    in-out property <string> api-input;
+    callback api-run();
+
+    // Minecraft
+    in-out property <string> mc-name;
+    in-out property <string> mc-pill;
+    in-out property <string> mc-pill-kind;
+    in-out property <string> mc-motd;
+    in-out property <string> mc-meta;
+    in-out property <[LineItem]> mc-lines;
+    in-out property <string> mc-input;
+    in-out property <[string]> mc-players;
+    in-out property <string> mc-online;
+    in-out property <[string]> mc-whitelist;
+    in-out property <[string]> mc-banned;
+    in-out property <string> mc-wl-name;
+    in-out property <string> mc-ban-name;
+    in-out property <string> mc-say;
+    in-out property <[RuleItem]> mc-rules;
+    callback mc-select(string);
+    callback mc-send();
+    callback mc-cmd(string);
+    callback mc-player(string, string);
+    callback mc-rule(string, bool);
+    callback mc-load();
+    callback mc-stop();
+    callback mc-edit();
+    callback mc-remove();
+    // Formular
+    in-out property <bool> mf-open;
+    in-out property <bool> mf-edit;
+    in-out property <string> mf-name;
+    in-out property <int> mf-via;
+    in-out property <[string]> mf-servers;
+    in-out property <int> mf-server;
+    in-out property <string> mf-host;
+    in-out property <string> mf-game: "25565";
+    in-out property <string> mf-rcon: "25575";
+    in-out property <string> mf-pass;
+    in-out property <string> mf-test;
+    in-out property <string> mf-error;
+    callback mf-new();
+    callback mf-try();
+    callback mf-save();
+
+    // Server hinzufügen
+    in-out property <bool> add-open;
+    in-out property <int> add-step;
+    in-out property <int> add-provider;
+    in-out property <int> add-env;
+    in-out property <string> add-key;
+    in-out property <string> add-error;
+    in-out property <string> add-info;
+    in-out property <[FoundItem]> found;
+    in-out property <string> add-manual;
+    in-out property <bool> add-busy;
+    callback add-probe();
+    callback add-confirm();
+
+    // Claude
+    in-out property <bool> cl-open;
+    in-out property <bool> cl-enabled;
+    in-out property <bool> cl-confirm: true;
+    in-out property <string> cl-status;
+    in-out property <string> cl-status-kind;
+    in-out property <string> cl-url;
+    in-out property <string> cl-token;
+    in-out property <bool> cl-show;
+    in-out property <string> cl-port;
+    in-out property <string> cl-msg;
+    in-out property <[AccessItem]> cl-access;
+    in-out property <string> cl-side: "Aus";
+    in-out property <bool> au-open;
+    in-out property <[AuditItem]> audit;
+    in-out property <string> au-search;
+    in-out property <bool> au-changes;
+    in-out property <string> au-stats;
+    in-out property <bool> ask-open;
+    in-out property <string> ask-server;
+    in-out property <string> ask-summary;
+    in-out property <string> ask-details;
+    callback cl-set-enabled(bool);
+    callback cl-set-confirm(bool);
+    callback cl-set-port(string);
+    callback cl-level(string, int);
+    callback cl-regen();
+    callback cl-register();
+    callback cl-copy(string);
+    callback au-load();
+    callback au-toggle(int);
+    callback au-export();
+    callback au-clear();
+    callback ask-answer(bool);
+
+    // Discord
+    in-out property <bool> dc-open;
+    in-out property <bool> dc-enabled;
+    in-out property <string> dc-status;
+    in-out property <string> dc-status-kind;
+    in-out property <string> dc-side: "Aus";
+    in-out property <string> dc-details;
+    in-out property <string> dc-state;
+    in-out property <string> dc-large;
+    in-out property <string> dc-large-text;
+    in-out property <string> dc-pv-details;
+    in-out property <string> dc-pv-state;
+    callback dc-set-enabled(bool);
+    callback dc-save();
+    callback dc-portal();
+
+    // Update
+    in-out property <bool> up-available;
+    in-out property <string> up-latest;
+    in-out property <bool> up-open;
+    in-out property <string> up-notes;
+    in-out property <float> up-progress: -2;
+    in-out property <string> up-status;
+    callback up-check();
+    callback up-install();
+
+    // Allgemein
+    in-out property <[ToastItem]> toasts;
+    in-out property <bool> dlg-open;
+    in-out property <string> dlg-title;
+    in-out property <string> dlg-text;
+    in-out property <bool> dlg-input;
+    in-out property <bool> dlg-secret;
+    in-out property <string> dlg-value;
+    in-out property <string> dlg-ok;
+    in-out property <bool> dlg-danger;
+    callback dlg-answer(bool);
+    callback server-select(string);
+    callback tab-changed(int);
+    callback mc-tab-changed(int);
+    callback power(string);
+    callback menu(string);
+    callback copy(string);
+    callback open-legal(string);
+}

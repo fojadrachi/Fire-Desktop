@@ -1,0 +1,61 @@
+// Farben und Maße im NNN-Stil
+export global Theme {
+    out property <color> bg: #0b0d12;
+    out property <color> bg-2: #10131a;
+    out property <color> panel: #151922;
+    out property <color> panel-2: #1b202b;
+    out property <color> panel-3: #262c39;
+    out property <color> line: #262c39;
+    out property <color> line-hi: #323a4a;
+    out property <color> fg: #e8ebf2;
+    out property <color> mut: #8b93a7;
+    out property <color> dim: #5f677b;
+    out property <color> acc: #ff6a2b;
+    out property <color> acc-hi: #ff9a3d;
+    out property <color> acc-ink: #1c0c04;
+    out property <color> good: #57d68d;
+    out property <color> bad: #ff6b6b;
+    out property <color> blue: #8fa8ff;
+    out property <length> radius: 14px;
+    out property <string> sans: "Space Grotesk";
+    out property <string> mono: "JetBrains Mono";
+}
+
+// SVG-Pfade (24er Raster)
+export global Icons {
+    out property <string> play: "M7 4 L20 12 L7 20 Z";
+    out property <string> plus: "M12 5 V19 M5 12 H19";
+    out property <string> sync: "M20 12 A8 8 0 0 1 6 17.3 M4 12 A8 8 0 0 1 18 6.7 M18 3 V7 H14 M6 21 V17 H10";
+    out property <string> upload: "M12 16 V4 M6 10 L12 4 L18 10 M4 20 H20";
+    out property <string> download: "M12 4 V15 M7 10 L12 15 L17 10 M5 20 H19";
+    out property <string> trash: "M4 7 H20 M9 7 V4 H15 V7 M6 7 L7 20 H17 L18 7";
+    out property <string> folder: "M3 6 H9 L11 8 H21 V19 H3 Z";
+    out property <string> back: "M15 18 L9 12 L15 6";
+    out property <string> link: "M10 14 A4 4 0 0 0 15.7 14 L18.7 11 A4 4 0 0 0 13 5.3 L12 6.3 M14 10 A4 4 0 0 0 8.3 10 L5.3 13 A4 4 0 0 0 11 18.7 L12 17.7";
+    out property <string> bell: "M6 9 A6 6 0 0 1 18 9 C18 14 20 15.5 20 15.5 H4 C4 15.5 6 14 6 9 M10 19 A2 2 0 0 0 14 19";
+    out property <string> search: "M11 5 A6 6 0 1 1 10.99 5 M20 20 L15.5 15.5";
+    out property <string> users: "M9 4.5 A3.5 3.5 0 1 1 8.99 4.5 M2.5 20 C3.3 16.4 5.9 14.5 9 14.5 C12.1 14.5 14.7 16.4 15.5 20 M17 6.5 A2.5 2.5 0 1 1 16.99 6.5 M17 14.5 C19.4 14.5 21 16 21.5 19";
+    out property <string> grid: "M4 4 H10 V10 H4 Z M14 4 H20 V10 H14 Z M4 14 H10 V20 H4 Z M14 14 H20 V20 H14 Z";
+    out property <string> gear: "M12 9 A3 3 0 1 1 11.99 9 M12 2 V5 M12 19 V22 M2 12 H5 M19 12 H22 M4.9 4.9 L7 7 M17 17 L19.1 19.1 M4.9 19.1 L7 17 M17 7 L19.1 4.9";
+    out property <string> check: "M5 12 L10 17 L19 7";
+    out property <string> x: "M6 6 L18 18 M18 6 L6 18";
+    out property <string> box: "M4 7 L12 3 L20 7 V17 L12 21 L4 17 Z M4 7 L12 11 L20 7 M12 11 V21";
+    out property <string> join: "M15 3 H20 V21 H15 M10 17 L15 12 L10 7 M15 12 H3";
+    out property <string> copy: "M8 8 H20 V20 H8 Z M16 8 V4 H4 V16 H8";
+    out property <string> star: "M12 3 L14.6 8.9 L21 9.5 L16.2 13.7 L17.6 20 L12 16.7 L6.4 20 L7.8 13.7 L3 9.5 L9.4 8.9 Z";
+    out property <string> external: "M14 4 H20 V10 M20 4 L11 13 M18 14 V20 H4 V6 H10";
+    out property <string> crown: "M3 8 L7.5 12 L12 5 L16.5 12 L21 8 L19 18 H5 Z";
+    out property <string> flask: "M9 3 H15 M10 3 V9 L4.5 19 A1.5 1.5 0 0 0 6 21 H18 A1.5 1.5 0 0 0 19.5 19 L14 9 V3";
+    out property <string> dots: "M4 12 A1 1 0 1 0 6 12 A1 1 0 1 0 4 12 M11 12 A1 1 0 1 0 13 12 A1 1 0 1 0 11 12 M18 12 A1 1 0 1 0 20 12 A1 1 0 1 0 18 12";
+    out property <string> power: "M12 3 V12 M6.5 6.5 A8 8 0 1 0 17.5 6.5";
+    out property <string> stop: "M6 6 H18 V18 H6 Z";
+    out property <string> restart: "M20 12 A8 8 0 1 1 17.7 6.3 M20 3 V7 H16";
+    out property <string> flame: "M12 2 C13 5.5 16.5 7.5 16.5 12 A4.5 4.5 0 0 1 7.5 12 C7.5 10 8.5 8.5 9.5 7.5 C9.7 9.1 10.5 10.1 11.5 10.5 C11.5 7.5 12 4.5 12 2 Z";
+    out property <string> terminal: "M4 6 L10 12 L4 18 M12 18 H20";
+    out property <string> file: "M6 3 H14 L19 8 V21 H6 Z M14 3 V8 H19";
+    out property <string> edit: "M4 20 L8 19 L19 8 L16 5 L5 16 Z";
+    out property <string> sparkle: "M12 2 L14.2 8.8 L21 11 L14.2 13.2 L12 20 L9.8 13.2 L3 11 L9.8 8.8 Z";
+    out property <string> cube: "M4 7 L12 3 L20 7 V17 L12 21 L4 17 Z M4 7 L12 11 L20 7 M12 11 V21";
+    out property <string> chat: "M4 5 H20 V16 H9 L4 20 Z";
+    out property <string> user: "M12 4 A4 4 0 1 1 11.99 4 M4 21 C5 16.5 8 14.5 12 14.5 C16 14.5 19 16.5 20 21";
+}

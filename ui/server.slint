@@ -1,0 +1,518 @@
+import { ListView, ScrollView } from "std-widgets.slint";
+import { Theme, Icons } from "theme.slint";
+import { Icon, Button, IconButton, Field, Label, Tag, Card, ProgressBar, Toggle, Segmented, Check } from "widgets.slint";
+import { S, KV, TermRow, FileItem, SiteItem, BackupItem, LineItem } from "state.slint";
+
+component Stat inherits Card {
+    in property <string> label;
+    in property <string> value;
+    in property <float> part;
+    min-height: 104px;
+    VerticalLayout {
+        padding: 16px;
+        spacing: 6px;
+        Text { text: label; color: Theme.mut; font-size: 12px; }
+        Text { text: value; color: Theme.fg; font-size: 22px; font-weight: 700; overflow: elide; }
+        Rectangle { }
+        ProgressBar { value: part; }
+    }
+}
+
+component KvList inherits Card {
+    in property <string> title;
+    in property <[KV]> rows;
+    VerticalLayout {
+        padding: 16px;
+        spacing: 8px;
+        Label { text: title; }
+        for r in rows: HorizontalLayout {
+            spacing: 12px;
+            Text { text: r.k; width: 130px; color: Theme.mut; font-size: 13px; }
+            Text { text: r.v; color: Theme.fg; font-size: 13px; wrap: word-wrap; }
+            if r.k == "IPv4" || r.k == "SSH": Rectangle {
+                width: 22px;
+                horizontal-stretch: 0;
+                Icon { d: Icons.copy; size: 13px; tint: Theme.dim; }
+                TouchArea { mouse-cursor: pointer; clicked => { S.copy(r.v); } }
+            }
+        }
+        Rectangle { }
+    }
+}
+
+component Overview inherits ScrollView {
+    VerticalLayout {
+        spacing: 14px;
+        HorizontalLayout {
+            spacing: 14px;
+            Stat { label: "CPU"; value: S.cpu; part: S.cpu-v; }
+            Stat { label: "Arbeitsspeicher"; value: S.ram; part: S.ram-v; }
+            Stat { label: "NVMe-Speicher"; value: S.disk; part: S.disk-v; }
+            Stat { label: "Traffic (Monat)"; value: S.traffic; part: S.traffic-v; }
+        }
+        HorizontalLayout {
+            spacing: 14px;
+            KvList { title: "KONFIGURATION"; rows: S.cfg; }
+            KvList { title: "NETZWERK & ZUGANG"; rows: S.net; }
+        }
+        KvList { title: "HOSTSYSTEM"; rows: S.host; }
+    }
+}
+
+// ---------- Konsole ----------
+
+component Terminal inherits Rectangle {
+    background: #07080c;
+    border-radius: 12px;
+    border-width: 1px;
+    border-color: fs.has-focus ? Theme.acc : Theme.line;
+    clip: true;
+    changed width => { S.term-resize(self.width, self.height); }
+    changed height => { S.term-resize(self.width, self.height); }
+    fs := FocusScope {
+        key-pressed(e) => {
+            if (e.modifiers.control && e.modifiers.shift && (e.text == "c" || e.text == "C")) { S.term-copy(); return accept; }
+            if (e.modifiers.control && (e.text == "v" || e.text == "V")) { S.term-paste(); return accept; }
+            S.term-key(e.text, e.modifiers.control, e.modifiers.alt);
+            accept
+        }
+        TouchArea { clicked => { fs.focus(); } }
+        VerticalLayout {
+            padding: 10px;
+            alignment: start;
+            for row in S.term: HorizontalLayout {
+                height: 18px;
+                alignment: start;
+                for run in row.runs: Rectangle {
+                    background: run.bg;
+                    horizontal-stretch: 0;
+                    width: t.preferred-width;
+                    t := Text {
+                        x: 0;
+                        text: run.text;
+                        color: run.fg;
+                        font-family: Theme.mono;
+                        font-size: 13px;
+                        font-weight: run.bold ? 700 : 400;
+                    }
+                }
+            }
+        }
+    }
+    public function focus-term() { fs.focus(); }
+}
+
+component ConsoleTab inherits VerticalLayout {
+    spacing: 12px;
+    HorizontalLayout {
+        spacing: 8px;
+        Tag { text: S.ssh-state; kind: S.ssh-on ? "good" : ""; }
+        Text { text: S.ssh-user + "@" + S.ssh-host; color: Theme.mut; font-family: Theme.mono; font-size: 12px; vertical-alignment: center; }
+        Rectangle { }
+        Button { text: "noVNC"; small: true; clicked => { S.open-novnc(); } }
+        Button { text: "Zugangsdaten"; small: true; clicked => { S.ssh-form = !S.ssh-form; } }
+        if S.ssh-on: Button { text: "Trennen"; small: true; clicked => { S.ssh-disconnect(); } }
+        if !S.ssh-on: Button { text: "Verbinden"; small: true; kind: "primary"; busy: S.ssh-busy; clicked => { S.ssh-connect(); term.focus-term(); } }
+    }
+    if S.ssh-form: Card {
+        height: 118px;
+        VerticalLayout {
+            padding: 12px;
+            spacing: 8px;
+            HorizontalLayout {
+                spacing: 8px;
+                Field { text <=> S.ssh-host; placeholder: "Host / IP"; mono: true; }
+                Field { text <=> S.ssh-port; placeholder: "Port"; mono: true; width: 80px; }
+                Field { text <=> S.ssh-user; placeholder: "Benutzer"; mono: true; }
+                Field { text <=> S.ssh-pass; placeholder: "Passwort"; password: true; mono: true; }
+            }
+            HorizontalLayout {
+                spacing: 8px;
+                Text { text: "24fire gibt das Root-Passwort nicht mehr heraus: einmal eintragen, die App merkt es sich verschlüsselt."; color: Theme.mut; font-size: 12px; vertical-alignment: center; wrap: word-wrap; }
+                Button { text: "Host-Key vergessen"; small: true; clicked => { S.ssh-forget(); } }
+            }
+        }
+    }
+    term := Terminal { vertical-stretch: 1; }
+}
+
+// ---------- Dateien ----------
+
+component RemoteGate inherits Card {
+    height: 74px;
+    HorizontalLayout {
+        padding: 16px;
+        spacing: 12px;
+        VerticalLayout {
+            alignment: center;
+            Text { text: "Nicht mit dem Server verbunden"; color: Theme.fg; font-weight: 700; }
+            Text { text: S.remote-error != "" ? S.remote-error : "Nutzt die Zugangsdaten aus dem Konsole-Tab."; color: S.remote-error != "" ? Theme.bad : Theme.mut; font-size: 12px; wrap: word-wrap; }
+        }
+        Button { text: "Verbinden"; kind: "primary"; clicked => { S.remote-connect(); } }
+    }
+}
+
+component FileRow inherits Rectangle {
+    in property <FileItem> item;
+    height: 36px;
+    background: item.selected ? #ff6a2b18 : ta.has-hover ? Theme.panel-2 : transparent;
+    ta := TouchArea {
+        double-clicked => { S.fm-open(item.name); }
+    }
+    HorizontalLayout {
+        padding-left: 12px;
+        padding-right: 12px;
+        spacing: 10px;
+        Rectangle {
+            width: 18px;
+            horizontal-stretch: 0;
+            Rectangle {
+                width: 15px;
+                height: 15px;
+                border-radius: 4px;
+                background: item.selected ? Theme.acc : Theme.bg;
+                border-width: 1px;
+                border-color: Theme.line-hi;
+            }
+            TouchArea { mouse-cursor: pointer; clicked => { S.fm-toggle(item.name); } }
+        }
+        VerticalLayout {
+            alignment: center;
+            Icon { d: item.is-dir ? Icons.folder : Icons.file; tint: item.is-dir ? Theme.acc-hi : item.is-link ? Theme.blue : Theme.mut; size: 16px; }
+        }
+        Text { text: item.name; color: Theme.fg; font-size: 13px; vertical-alignment: center; overflow: elide; horizontal-stretch: 1; }
+        Text { text: item.size; width: 80px; color: Theme.mut; font-size: 12px; vertical-alignment: center; horizontal-alignment: right; }
+        Text { text: item.date; width: 110px; color: Theme.mut; font-size: 12px; vertical-alignment: center; }
+        Text { text: item.perms; width: 86px; color: Theme.dim; font-size: 11px; font-family: Theme.mono; vertical-alignment: center; }
+        for a[i] in [{ t: "Laden", k: "download" }, { t: "Name", k: "rename" }, { t: "Rechte", k: "chmod" }, { t: "✕", k: "delete" }]: Rectangle {
+            width: a.k == "delete" ? 24px : a.k == "download" ? 42px : a.k == "rename" ? 40px : 44px;
+            horizontal-stretch: 0;
+            Text { text: a.t; color: ht.has-hover ? (a.k == "delete" ? Theme.bad : Theme.fg) : Theme.dim; font-size: 12px; }
+            ht := TouchArea {
+                mouse-cursor: pointer;
+                clicked => {
+                    if (a.k == "download") { S.fm-download(item.name); }
+                    if (a.k == "rename") { S.fm-rename(item.name); }
+                    if (a.k == "chmod") { S.fm-chmod(item.name); }
+                    if (a.k == "delete") { S.fm-delete(item.name); }
+                }
+            }
+        }
+    }
+}
+
+component FilesTab inherits VerticalLayout {
+    spacing: 10px;
+    if !S.remote-on: RemoteGate { }
+    if S.remote-on: HorizontalLayout {
+        spacing: 6px;
+        IconButton { icon: Icons.back; tooltip: "Hoch"; clicked => { S.fm-up(); } }
+        IconButton { icon: Icons.sync; tooltip: "Aktualisieren"; clicked => { S.fm-refresh(); } }
+        Field { text <=> S.fm-path; mono: true; horizontal-stretch: 1; accepted => { S.fm-go(self.text); } }
+        Field { text <=> S.fm-filter; placeholder: "Filtern…"; width: 140px; edited(t) => { S.fm-filter-changed(t); } }
+        Button { text: "Ordner"; icon: Icons.plus; clicked => { S.fm-new-folder(); } }
+        Button { text: "Datei"; icon: Icons.plus; clicked => { S.fm-new-file(); } }
+        Button { text: "Ordner hoch"; clicked => { S.fm-upload(true); } }
+        Button { text: "Hochladen"; icon: Icons.upload; kind: "primary"; clicked => { S.fm-upload(false); } }
+    }
+    if S.remote-on && S.fm-selected > 0: HorizontalLayout {
+        spacing: 8px;
+        Text { text: S.fm-selected + " ausgewählt"; color: Theme.acc-hi; font-weight: 700; vertical-alignment: center; }
+        Button { text: "Herunterladen"; small: true; clicked => { S.fm-download(""); } }
+        Button { text: "Löschen"; small: true; kind: "danger"; clicked => { S.fm-delete(""); } }
+        Rectangle { }
+    }
+    if S.remote-on: Card {
+        vertical-stretch: 1;
+        ListView {
+            for f in S.files: FileRow { item: f; }
+        }
+    }
+}
+
+// ---------- Nginx ----------
+
+component SiteRow inherits Rectangle {
+    in property <SiteItem> site;
+    height: 58px;
+    border-radius: 10px;
+    background: Theme.bg-2;
+    border-width: 1px;
+    border-color: Theme.line;
+    HorizontalLayout {
+        padding: 10px;
+        spacing: 12px;
+        if site.toggle: VerticalLayout {
+            alignment: center;
+            Toggle { on: site.enabled; toggled(v) => { S.ngx-toggle(site.file, v); } }
+        }
+        VerticalLayout {
+            alignment: center;
+            horizontal-stretch: 1;
+            Text { text: site.label; color: Theme.fg; font-family: Theme.mono; font-size: 13px; font-weight: 700; }
+            Text { text: site.names; color: Theme.mut; font-size: 12px; overflow: elide; }
+        }
+        Button { text: "Bearbeiten"; small: true; clicked => { S.ngx-edit(site.file); } }
+        if site.toggle: Button { text: "Löschen"; small: true; kind: "danger"; clicked => { S.ngx-delete(site.file); } }
+    }
+}
+
+component NginxTab inherits ScrollView {
+    VerticalLayout {
+        spacing: 12px;
+        alignment: start;
+        if !S.remote-on: RemoteGate { }
+        if S.remote-on: HorizontalLayout {
+            spacing: 8px;
+            Tag { text: S.ngx-status; kind: S.ngx-status-kind; }
+            Text { text: S.ngx-version; color: Theme.mut; font-family: Theme.mono; font-size: 12px; vertical-alignment: center; }
+            Rectangle { }
+            Button { text: "Testen"; small: true; clicked => { S.ngx-action("test"); } }
+            Button { text: "Neu laden"; small: true; clicked => { S.ngx-action("reload"); } }
+            Button { text: "Neustart"; small: true; clicked => { S.ngx-action("restart"); } }
+            Button { text: "Logs"; small: true; clicked => { S.ngx-action("logs"); } }
+            Button { text: "Neue Site"; small: true; kind: "primary"; clicked => { S.ns-open = true; } }
+        }
+        if S.remote-on && !S.ngx-installed: Card {
+            height: 100px;
+            VerticalLayout {
+                padding: 16px;
+                spacing: 8px;
+                Text { text: "Nginx ist nicht installiert."; color: Theme.fg; font-weight: 700; }
+                Button { text: "Nginx installieren"; kind: "primary"; horizontal-stretch: 0; clicked => { S.ngx-action("install"); } }
+            }
+        }
+        if S.remote-on && S.ngx-installed: Card {
+            VerticalLayout {
+                padding: 14px;
+                spacing: 8px;
+                alignment: start;
+                Label { text: "SITES"; }
+                for s in S.sites: SiteRow { site: s; }
+                if S.sites.length == 0: Text { text: "Noch keine Sites – lege mit „Neue Site“ eine an."; color: Theme.mut; }
+                Label { text: "WEITERE KONFIGURATION"; }
+                for s in S.ngx-other: SiteRow { site: s; }
+            }
+        }
+        if S.ngx-output != "": Card {
+            VerticalLayout {
+                padding: 14px;
+                spacing: 6px;
+                HorizontalLayout {
+                    Label { text: S.ngx-output-title; }
+                    Button { text: "Schließen"; small: true; clicked => { S.ngx-output = ""; } }
+                }
+                Text { text: S.ngx-output; color: S.ngx-output-ok ? Theme.good : Theme.fg; font-family: Theme.mono; font-size: 12px; wrap: word-wrap; }
+            }
+        }
+    }
+}
+
+// ---------- Statistiken ----------
+
+component Chart inherits Card {
+    in property <string> title;
+    in property <string> path;
+    in property <string> top;
+    in property <color> tint: Theme.acc;
+    height: 210px;
+    VerticalLayout {
+        padding: 14px;
+        spacing: 6px;
+        HorizontalLayout {
+            Label { text: title; }
+            Text { text: top; color: Theme.dim; font-size: 11px; horizontal-alignment: right; }
+        }
+        Rectangle {
+            border-width: 1px;
+            border-color: Theme.line;
+            border-radius: 6px;
+            clip: true;
+            if path != "": Path {
+                width: 100%;
+                height: 100%;
+                viewbox-width: 1000;
+                viewbox-height: 200;
+                commands: path;
+                stroke: tint;
+                stroke-width: 2px;
+                fill: transparent;
+            }
+            if path == "": Text { text: "Keine Daten"; color: Theme.dim; }
+        }
+    }
+}
+
+component StatsTab inherits ScrollView {
+    VerticalLayout {
+        spacing: 12px;
+        alignment: start;
+        Text { text: S.stats-info; color: Theme.mut; font-size: 12px; }
+        HorizontalLayout {
+            spacing: 12px;
+            Chart { title: "CPU"; path: S.chart-cpu; top: S.chart-cpu-max; }
+            Chart { title: "ARBEITSSPEICHER"; path: S.chart-mem; top: S.chart-mem-max; tint: Theme.blue; }
+        }
+        HorizontalLayout {
+            spacing: 12px;
+            Chart { title: "PING"; path: S.chart-ping; top: S.chart-ping-max; tint: Theme.good; }
+            Card {
+                height: 210px;
+                VerticalLayout {
+                    padding: 14px;
+                    spacing: 8px;
+                    Label { text: "VERFÜGBARKEIT"; }
+                    HorizontalLayout {
+                        spacing: 8px;
+                        for a in S.avail: VerticalLayout {
+                            Text { text: a.label; color: Theme.mut; font-size: 12px; }
+                            Text { text: a.value; color: Theme.fg; font-size: 17px; font-weight: 700; }
+                            Text { text: a.sub; color: Theme.dim; font-size: 11px; }
+                        }
+                    }
+                    Label { text: "LETZTE AUSFÄLLE"; }
+                    for i in S.incidents: HorizontalLayout {
+                        spacing: 10px;
+                        Text { text: i.start; color: Theme.mut; font-size: 12px; width: 110px; }
+                        Text { text: i.kind; color: Theme.fg; font-size: 12px; }
+                        Text { text: i.duration; color: Theme.mut; font-size: 12px; }
+                    }
+                    Rectangle { }
+                }
+            }
+        }
+    }
+}
+
+// ---------- Backups ----------
+
+component BackupsTab inherits VerticalLayout {
+    spacing: 10px;
+    HorizontalLayout {
+        spacing: 8px;
+        Field { text <=> S.backup-desc; placeholder: "Beschreibung (optional, max. 24 Zeichen)"; horizontal-stretch: 1; }
+        Button { text: "Backup erstellen"; kind: "primary"; clicked => { S.backup-create(); } }
+        Button { text: "Aktualisieren"; clicked => { S.backup-refresh(); } }
+    }
+    if S.backups-info != "": Text { text: S.backups-info; color: Theme.mut; wrap: word-wrap; }
+    Card {
+        vertical-stretch: 1;
+        ListView {
+            for b in S.backups: Rectangle {
+                height: 48px;
+                HorizontalLayout {
+                    padding-left: 14px;
+                    padding-right: 14px;
+                    spacing: 12px;
+                    Text { text: b.created; width: 110px; color: Theme.fg; font-size: 13px; vertical-alignment: center; }
+                    Text { text: b.description; color: Theme.fg; font-size: 13px; vertical-alignment: center; overflow: elide; horizontal-stretch: 1; }
+                    Text { text: b.os; width: 120px; color: Theme.mut; font-family: Theme.mono; font-size: 12px; vertical-alignment: center; }
+                    Text { text: b.size; width: 70px; color: Theme.mut; font-size: 12px; vertical-alignment: center; }
+                    VerticalLayout { alignment: center; Tag { text: b.status; kind: b.ready ? "good" : ""; } }
+                    Button { text: "Wiederherstellen"; small: true; enabled: b.ready; clicked => { S.backup-restore(b.id); } }
+                    Button { text: "Löschen"; small: true; kind: "danger"; clicked => { S.backup-delete(b.id); } }
+                }
+            }
+        }
+    }
+}
+
+// ---------- API-Konsole ----------
+
+export component LineLog inherits Rectangle {
+    in property <[LineItem]> lines;
+    background: #07080c;
+    border-radius: 12px;
+    border-width: 1px;
+    border-color: Theme.line;
+    clip: true;
+    ScrollView {
+        content-y: min(0px, self.height - col.preferred-height - 16px);
+        content-height: max(self.height, col.preferred-height + 16px);
+        col := VerticalLayout {
+            x: 12px;
+            y: 8px;
+            width: parent.width - 24px;
+            alignment: start;
+            for l in lines: Text {
+                text: l.text;
+                wrap: word-wrap;
+                font-family: Theme.mono;
+                font-size: 12.5px;
+                color: l.kind == "cmd" ? #55ff55 : l.kind == "err" ? Theme.bad : l.kind == "ok" ? Theme.good : l.kind == "info" ? Theme.mut : #e0e0e0;
+            }
+        }
+    }
+}
+
+component ApiTab inherits VerticalLayout {
+    spacing: 10px;
+    LineLog { lines: S.api-lines; vertical-stretch: 1; }
+    Field {
+        text <=> S.api-input;
+        mono: true;
+        placeholder: "z. B. GET /v1/account oder POST /v1/servers/<id>/power mode=restart";
+        accepted => { S.api-run(); }
+    }
+}
+
+// ---------- Rahmen ----------
+
+export component ServerView inherits VerticalLayout {
+    padding: 0;
+    HorizontalLayout {
+        padding-left: 24px;
+        padding-right: 24px;
+        padding-top: 18px;
+        padding-bottom: 12px;
+        spacing: 8px;
+        VerticalLayout {
+            spacing: 4px;
+            alignment: center;
+            horizontal-stretch: 1;
+            HorizontalLayout {
+                spacing: 10px;
+                alignment: start;
+                Text { text: S.srv-name; color: Theme.fg; font-size: 21px; font-weight: 700; }
+                VerticalLayout { alignment: center; Tag { text: S.srv-pill; kind: S.srv-pill-kind; } }
+                if S.srv-task != "": VerticalLayout { alignment: center; Tag { text: S.srv-task; kind: "acc"; } }
+            }
+            Text { text: S.srv-meta; color: Theme.mut; font-family: Theme.mono; font-size: 12px; overflow: elide; }
+        }
+        Button { text: "Start"; icon: Icons.play; clicked => { S.power("start"); } }
+        Button { text: "Neustart"; icon: Icons.restart; clicked => { S.power("restart"); } }
+        Button { text: "Stop"; icon: Icons.stop; kind: "danger"; clicked => { S.power("stop"); } }
+        Button { text: "API-Key ändern"; clicked => { S.menu("key"); } }
+        Button { text: "Umbenennen"; clicked => { S.menu("rename"); } }
+        Button { icon: Icons.trash; kind: "danger"; clicked => { S.menu("remove"); } }
+    }
+    HorizontalLayout {
+        padding-left: 24px;
+        padding-bottom: 10px;
+        spacing: 4px;
+        alignment: start;
+        for t[i] in ["Übersicht", "Konsole", "Dateien", "Nginx", "Statistiken", "Backups", "API-Konsole"]: Rectangle {
+            horizontal-stretch: 0;
+            height: 34px;
+            width: lb.preferred-width + 26px;
+            border-radius: 8px;
+            background: i == S.tab ? Theme.panel-3 : ta.has-hover ? Theme.panel-2 : transparent;
+            lb := Text { text: t; color: i == S.tab ? Theme.fg : Theme.mut; font-size: 13px; font-weight: 600; }
+            ta := TouchArea { mouse-cursor: pointer; clicked => { S.tab = i; S.tab-changed(i); } }
+        }
+    }
+    Rectangle { height: 1px; background: Theme.line; }
+    Rectangle {
+        vertical-stretch: 1;
+        VerticalLayout {
+            padding: 18px;
+            if S.tab == 0: Overview { }
+            if S.tab == 1: ConsoleTab { }
+            if S.tab == 2: FilesTab { }
+            if S.tab == 3: NginxTab { }
+            if S.tab == 4: StatsTab { }
+            if S.tab == 5: BackupsTab { }
+            if S.tab == 6: ApiTab { }
+        }
+    }
+}

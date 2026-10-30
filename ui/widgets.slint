@@ -1,0 +1,422 @@
+import { Theme, Icons } from "theme.slint";
+
+export component Icon inherits Path {
+    in property <string> d;
+    in property <brush> tint: Theme.fg;
+    in property <length> size: 18px;
+    width: size;
+    height: size;
+    viewbox-width: 24;
+    viewbox-height: 24;
+    commands: d;
+    stroke: tint;
+    stroke-width: 2px;
+    fill: transparent;
+}
+
+export component FilledIcon inherits Path {
+    in property <string> d;
+    in property <brush> tint: Theme.fg;
+    in property <length> size: 18px;
+    width: size;
+    height: size;
+    viewbox-width: 24;
+    viewbox-height: 24;
+    commands: d;
+    fill: tint;
+}
+
+// kind: "primary" | "ghost" | "danger" | "soft"
+export component Button inherits Rectangle {
+    in property <string> text;
+    in property <string> icon;
+    in property <string> kind: "ghost";
+    in property <bool> enabled: true;
+    in property <bool> small: false;
+    in property <bool> big: false;
+    in property <bool> busy: false;
+    callback clicked();
+    horizontal-stretch: 0;
+    vertical-stretch: 0;
+
+    property <bool> hover: ta.has-hover && enabled && !busy;
+    property <color> fg: kind == "primary" ? Theme.acc-ink : kind == "danger" ? Theme.bad : Theme.fg;
+    height: big ? 48px : small ? 32px : 38px;
+    min-width: self.height;
+    border-radius: self.height / 2;
+    background: kind == "primary" ? (hover ? Theme.acc-hi : Theme.acc)
+        : kind == "danger" ? (hover ? #ff6b6b22 : transparent)
+        : kind == "soft" ? (hover ? Theme.panel-3 : Theme.panel-2)
+        : (hover ? Theme.panel-3 : Theme.panel-2);
+    border-width: kind == "primary" ? 0 : 1px;
+    border-color: kind == "danger" ? #ff6b6b55 : hover ? Theme.line-hi : Theme.line;
+    opacity: enabled ? 1 : 0.45;
+    drop-shadow-blur: kind == "primary" && hover ? 18px : 0;
+    drop-shadow-color: #ff6a2b55;
+    animate background, drop-shadow-blur { duration: 120ms; }
+
+    HorizontalLayout {
+        padding-left: text == "" ? 0 : big ? 26px : small ? 12px : 16px;
+        padding-right: self.padding-left;
+        spacing: 8px;
+        alignment: center;
+        if busy: Text { text: "…"; color: fg; font-size: 16px; vertical-alignment: center; }
+        if icon != "" && !busy: VerticalLayout {
+            alignment: center;
+            if kind == "primary" && icon == Icons.play: FilledIcon { d: icon; tint: fg; size: big ? 18px : 15px; }
+            if !(kind == "primary" && icon == Icons.play): Icon { d: icon; tint: fg; size: big ? 18px : 15px; }
+        }
+        if text != "": Text {
+            text: text;
+            color: fg;
+            font-size: big ? 16px : small ? 13px : 14px;
+            font-weight: kind == "primary" ? 700 : 500;
+            vertical-alignment: center;
+        }
+    }
+    ta := TouchArea {
+        mouse-cursor: enabled && !busy ? pointer : default;
+        clicked => { if (enabled && !busy) { root.clicked(); } }
+    }
+}
+
+export component IconButton inherits Rectangle {
+    in property <string> icon;
+    in property <brush> tint: Theme.mut;
+    in property <string> tooltip;
+    in property <bool> active: false;
+    callback clicked();
+    width: 38px;
+    height: 38px;
+    horizontal-stretch: 0;
+    border-radius: 19px;
+    background: ta.has-hover || active ? Theme.panel-3 : Theme.panel-2;
+    border-width: 1px;
+    border-color: active ? Theme.acc : ta.has-hover ? Theme.line-hi : Theme.line;
+    animate background, border-color { duration: 120ms; }
+    Icon { d: icon; tint: ta.has-hover || active ? Theme.fg : tint; size: 17px; }
+    ta := TouchArea { mouse-cursor: pointer; clicked => { root.clicked(); } }
+}
+
+export component Field inherits Rectangle {
+    in-out property <string> text;
+    in property <string> placeholder;
+    in property <bool> password: false;
+    in property <bool> mono: false;
+    in property <bool> pill: false;
+    in property <string> icon;
+    callback accepted();
+    callback edited(string);
+    forward-focus: input;
+    height: 40px;
+    border-radius: pill ? 20px : 10px;
+    background: Theme.bg;
+    border-width: 1px;
+    border-color: input.has-focus ? Theme.acc : Theme.line;
+    drop-shadow-blur: input.has-focus ? 10px : 0;
+    drop-shadow-color: #ff6a2b33;
+    animate border-color { duration: 120ms; }
+    HorizontalLayout {
+        padding-left: pill ? 16px : 12px;
+        padding-right: 12px;
+        spacing: 10px;
+        if icon != "": VerticalLayout { alignment: center; Icon { d: icon; tint: Theme.mut; size: 16px; } }
+        Rectangle {
+            input := TextInput {
+                width: 100%;
+                height: 100%;
+                text <=> root.text;
+                color: Theme.fg;
+                font-size: 14px;
+                font-family: mono ? Theme.mono : Theme.sans;
+                vertical-alignment: center;
+                selection-background-color: #ff6a2b55;
+                input-type: password ? InputType.password : InputType.text;
+                single-line: true;
+                accepted => { root.accepted(); }
+                edited => { root.edited(self.text); }
+            }
+            if root.text == "": Text {
+                x: 0;
+                width: 100%;
+                height: 100%;
+                text: placeholder;
+                color: Theme.dim;
+                font-size: 14px;
+                vertical-alignment: center;
+            }
+        }
+    }
+}
+
+export component TextArea inherits Rectangle {
+    in-out property <string> text;
+    in property <string> placeholder;
+    forward-focus: input;
+    height: 96px;
+    border-radius: 10px;
+    background: Theme.bg;
+    border-width: 1px;
+    border-color: input.has-focus ? Theme.acc : Theme.line;
+    Rectangle {
+        x: 12px;
+        y: 10px;
+        width: parent.width - 24px;
+        height: parent.height - 20px;
+        input := TextInput {
+            width: 100%;
+            height: 100%;
+            text <=> root.text;
+            color: Theme.fg;
+            font-size: 14px;
+            wrap: word-wrap;
+            single-line: false;
+            selection-background-color: #ff6a2b55;
+        }
+        if root.text == "": Text { width: 100%; text: placeholder; color: Theme.dim; font-size: 14px; vertical-alignment: top; wrap: word-wrap; }
+    }
+}
+
+export component Label inherits Text {
+    color: Theme.mut;
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 1.2px;
+}
+
+export component Tag inherits Rectangle {
+    in property <string> text;
+    in property <string> kind: "";
+    in property <string> icon;
+    property <color> c: kind == "acc" ? Theme.acc : kind == "blue" ? Theme.blue : kind == "warn" ? Theme.bad : kind == "good" ? Theme.good : Theme.mut;
+    height: 22px;
+    horizontal-stretch: 0;
+    vertical-stretch: 0;
+    border-radius: 11px;
+    background: kind == "" ? Theme.panel-3 : c.transparentize(0.86);
+    HorizontalLayout {
+        padding-left: 9px;
+        padding-right: 9px;
+        spacing: 5px;
+        alignment: center;
+        if icon != "": VerticalLayout { alignment: center; Icon { d: icon; tint: c; size: 11px; } }
+        Text { text: text; color: c; font-size: 11px; font-weight: 600; font-family: Theme.mono; vertical-alignment: center; }
+    }
+}
+
+export component Badge inherits Rectangle {
+    in property <int> count;
+    visible: count > 0;
+    horizontal-stretch: 0;
+    height: 18px;
+    width: max(18px, t.preferred-width + 10px);
+    border-radius: 9px;
+    background: Theme.bad;
+    t := Text { text: count > 9 ? "9+" : count; color: white; font-size: 11px; font-weight: 700; font-family: Theme.mono; }
+}
+
+// Farbiges Quadrat mit Anfangsbuchstabe
+export component Monogram inherits Rectangle {
+    in property <string> letter;
+    in property <color> tint;
+    in property <length> size: 48px;
+    width: size;
+    height: size;
+    border-radius: size * 0.26;
+    background: @linear-gradient(135deg, tint.brighter(0.25) 0%, tint 55%, tint.darker(0.35) 100%);
+    drop-shadow-blur: size * 0.3;
+    drop-shadow-color: tint.transparentize(0.6);
+    drop-shadow-offset-y: size * 0.08;
+    Text { text: letter; color: #15111a; font-size: size * 0.46; font-weight: 700; }
+}
+
+export component Thumb inherits Rectangle {
+    in property <image> img;
+    in property <bool> has-img;
+    in property <length> size: 42px;
+    in property <bool> round: false;
+    in property <string> fallback;
+    width: size;
+    height: size;
+    border-radius: round ? size / 2 : size * 0.24;
+    background: Theme.panel-3;
+    clip: true;
+    if has-img: Image { width: 100%; height: 100%; source: img; image-fit: cover; image-rendering: round ? pixelated : smooth; }
+    if !has-img && fallback != "": Text { text: fallback; color: Theme.mut; font-size: size * 0.42; font-weight: 700; }
+}
+
+export component Card inherits Rectangle {
+    in property <bool> hoverable: false;
+    in property <bool> hovered: false;
+    background: Theme.panel;
+    border-radius: Theme.radius;
+    border-width: 1px;
+    border-color: hoverable && hovered ? Theme.line-hi : Theme.line;
+    drop-shadow-blur: hoverable && hovered ? 24px : 0;
+    drop-shadow-color: #00000066;
+    drop-shadow-offset-y: 8px;
+    animate border-color, drop-shadow-blur { duration: 150ms; }
+}
+
+// value < 0 = unbestimmt (laufender Balken)
+export component ProgressBar inherits Rectangle {
+    in property <float> value: -1;
+    height: 6px;
+    border-radius: 3px;
+    background: Theme.panel-3;
+    clip: true;
+    if value >= 0: Rectangle {
+        x: 0;
+        width: parent.width * clamp(value, 0, 1);
+        height: 100%;
+        border-radius: 3px;
+        background: @linear-gradient(90deg, Theme.acc 0%, Theme.acc-hi 100%);
+        animate width { duration: 150ms; }
+    }
+    if value < 0: Rectangle {
+        property <float> t: mod(animation-tick() / 1ms, 1400) / 1400;
+        width: parent.width * 0.3;
+        x: parent.width * (t * 1.3 - 0.3);
+        height: 100%;
+        border-radius: 3px;
+        background: @linear-gradient(90deg, transparent 0%, Theme.acc 50%, transparent 100%);
+    }
+}
+
+export component Check inherits Rectangle {
+    in-out property <bool> checked;
+    in property <string> text;
+    height: 28px;
+    HorizontalLayout {
+        spacing: 10px;
+        alignment: start;
+        VerticalLayout {
+            alignment: center;
+            Rectangle {
+                width: 20px;
+                height: 20px;
+                border-radius: 6px;
+                background: checked ? Theme.acc : Theme.bg;
+                border-width: checked ? 0 : 1px;
+                border-color: Theme.line-hi;
+                animate background { duration: 100ms; }
+                if checked: Icon { d: Icons.check; tint: Theme.acc-ink; size: 14px; }
+            }
+        }
+        Text { text: text; color: Theme.fg; font-size: 14px; vertical-alignment: center; }
+    }
+    TouchArea { mouse-cursor: pointer; clicked => { root.checked = !root.checked; } }
+}
+
+export component Segmented inherits Rectangle {
+    in property <[string]> options;
+    in-out property <int> current;
+    callback changed(int);
+    horizontal-stretch: 0;
+    height: 38px;
+    border-radius: 19px;
+    background: Theme.panel;
+    border-width: 1px;
+    border-color: Theme.line;
+    HorizontalLayout {
+        padding: 3px;
+        spacing: 2px;
+        for o[i] in options: Rectangle {
+            border-radius: 16px;
+            background: i == current ? Theme.acc : ta.has-hover ? Theme.panel-3 : transparent;
+            animate background { duration: 120ms; }
+            HorizontalLayout {
+                padding-left: 16px;
+                padding-right: 16px;
+                Text { text: o; color: i == current ? Theme.acc-ink : Theme.mut; font-size: 13px; font-weight: i == current ? 700 : 500; vertical-alignment: center; }
+            }
+            ta := TouchArea { mouse-cursor: pointer; clicked => { root.current = i; root.changed(i); } }
+        }
+    }
+}
+
+export component SectionTitle inherits HorizontalLayout {
+    in property <string> text;
+    spacing: 10px;
+    Label { text: root.text; vertical-alignment: center; }
+    VerticalLayout { alignment: center; Rectangle { height: 1px; background: Theme.line; } }
+}
+
+// Ein/Aus-Schalter
+export component Toggle inherits Rectangle {
+    in property <bool> on;
+    in property <string> tooltip;
+    callback toggled(bool);
+    width: 42px;
+    height: 24px;
+    horizontal-stretch: 0;
+    border-radius: 12px;
+    background: on ? Theme.acc : Theme.panel-3;
+    border-width: on ? 0 : 1px;
+    border-color: Theme.line-hi;
+    animate background { duration: 140ms; }
+    Rectangle {
+        width: 18px;
+        height: 18px;
+        y: 3px;
+        x: on ? parent.width - self.width - 3px : 3px;
+        border-radius: 9px;
+        background: on ? Theme.acc-ink : Theme.mut;
+        animate x { duration: 140ms; easing: ease-out; }
+    }
+    TouchArea { mouse-cursor: pointer; clicked => { root.toggled(!root.on); } }
+}
+
+// Badge eines Kontos ("owner" = Owner, "beta" = Beta Tester)
+export component UserBadge inherits Rectangle {
+    in property <string> kind;
+    in property <bool> large: false;
+    property <color> c: kind == "owner" ? Theme.acc : #b48cff;
+    height: large ? 26px : 20px;
+    horizontal-stretch: 0;
+    vertical-stretch: 0;
+    border-radius: self.height / 2;
+    background: kind == "owner"
+        ? @linear-gradient(90deg, #ff6a2b33 0%, #ffc86122 100%)
+        : @linear-gradient(90deg, #8f6bff33 0%, #b48cff22 100%);
+    border-width: 1px;
+    border-color: c.transparentize(0.45);
+    HorizontalLayout {
+        padding-left: large ? 10px : 7px;
+        padding-right: large ? 11px : 8px;
+        spacing: 4px;
+        alignment: center;
+        VerticalLayout { alignment: center; Icon { d: kind == "owner" ? Icons.crown : Icons.flask; tint: c; size: large ? 13px : 10px; } }
+        Text {
+            text: kind == "owner" ? "Owner" : kind == "beta" ? "Beta Tester" : kind;
+            color: c;
+            font-size: large ? 12px : 10px;
+            font-weight: 700;
+            vertical-alignment: center;
+        }
+    }
+}
+
+// Alle Badges eines Kontos nebeneinander
+export component Badges inherits HorizontalLayout {
+    in property <bool> owner;
+    in property <bool> beta;
+    in property <bool> large: false;
+    spacing: 5px;
+    alignment: start;
+    if owner: UserBadge { kind: "owner"; large: root.large; }
+    if beta: UserBadge { kind: "beta"; large: root.large; }
+}
+
+// Name mit Badges dahinter
+export component NameWithBadges inherits HorizontalLayout {
+    in property <string> name;
+    in property <bool> owner;
+    in property <bool> beta;
+    in property <length> size: 14px;
+    in property <color> color: Theme.fg;
+    spacing: 8px;
+    alignment: start;
+    Text { text: name; color: root.color; font-size: size; font-weight: 700; vertical-alignment: center; overflow: elide; }
+    if owner || beta: VerticalLayout { alignment: center; Badges { owner: root.owner; beta: root.beta; } }
+}

@@ -1,0 +1,662 @@
+import "fonts/SpaceGrotesk-Regular.ttf";
+import "fonts/SpaceGrotesk-Medium.ttf";
+import "fonts/SpaceGrotesk-Bold.ttf";
+import "fonts/JetBrainsMono-Medium.ttf";
+import "fonts/JetBrainsMono-Bold.ttf";
+
+import { ScrollView, TextEdit, ComboBox } from "std-widgets.slint";
+import { Theme, Icons } from "theme.slint";
+import { Icon, FilledIcon, Button, IconButton, Field, Label, Tag, Card, ProgressBar, Toggle, Segmented, Check } from "widgets.slint";
+import { S, SideItem } from "state.slint";
+import { ServerView, LineLog } from "server.slint";
+
+export { S }
+
+component Dot inherits Rectangle {
+    in property <string> state;
+    width: 9px;
+    height: 9px;
+    horizontal-stretch: 0;
+    border-radius: 4.5px;
+    background: state == "running" ? Theme.good : state == "stopped" ? Theme.bad : state == "busy" ? #ffc045 : Theme.dim;
+}
+
+component SideRow inherits Rectangle {
+    in property <SideItem> item;
+    in property <bool> active;
+    callback clicked();
+    height: 50px;
+    border-radius: 9px;
+    background: active ? Theme.panel-2 : ta.has-hover ? Theme.panel : transparent;
+    border-width: active ? 1px : 0;
+    border-color: Theme.line-hi;
+    HorizontalLayout {
+        padding-left: 10px;
+        padding-right: 8px;
+        spacing: 10px;
+        VerticalLayout { alignment: center; Dot { state: item.dot; } }
+        VerticalLayout {
+            alignment: center;
+            Text { text: item.name; color: Theme.fg; font-weight: 600; font-size: 13.5px; overflow: elide; }
+            Text { text: item.sub; color: Theme.mut; font-family: Theme.mono; font-size: 11px; overflow: elide; }
+        }
+    }
+    ta := TouchArea { mouse-cursor: pointer; clicked => { root.clicked(); } }
+}
+
+component SideButton inherits Rectangle {
+    in property <string> text;
+    in property <string> icon;
+    in property <string> state;
+    callback clicked();
+    height: 36px;
+    border-radius: 9px;
+    background: ta.has-hover ? Theme.panel-2 : transparent;
+    border-width: 1px;
+    border-color: Theme.line-hi;
+    HorizontalLayout {
+        padding-left: 12px;
+        padding-right: 10px;
+        spacing: 8px;
+        VerticalLayout { alignment: center; Icon { d: icon; size: 15px; tint: Theme.acc-hi; } }
+        Text { text: root.text; color: Theme.fg; font-weight: 600; font-size: 13px; vertical-alignment: center; }
+        Rectangle { }
+        if state != "": VerticalLayout { alignment: center; Tag { text: state; kind: state == "An" ? "good" : state == "Aus" ? "" : "warn"; } }
+    }
+    ta := TouchArea { mouse-cursor: pointer; clicked => { root.clicked(); } }
+}
+
+component Sidebar inherits Rectangle {
+    background: Theme.bg-2;
+    VerticalLayout {
+        padding: 12px;
+        spacing: 6px;
+        HorizontalLayout {
+            padding-bottom: 10px;
+            spacing: 10px;
+            Rectangle {
+                width: 34px;
+                height: 34px;
+                horizontal-stretch: 0;
+                border-radius: 10px;
+                background: @linear-gradient(135deg, #ff8a3d 0%, #e2321a 100%);
+                FilledIcon { d: Icons.flame; tint: white; size: 22px; }
+            }
+            VerticalLayout {
+                alignment: center;
+                Text { text: "Fire Desktop"; color: Theme.fg; font-weight: 700; font-size: 15px; }
+                Text { text: "24fire Server-Verwaltung"; color: Theme.mut; font-size: 11px; }
+            }
+        }
+        ScrollView {
+            vertical-stretch: 1;
+            VerticalLayout {
+                spacing: 4px;
+                alignment: start;
+                Label { text: "SERVER"; }
+                for s in S.servers: SideRow { item: s; active: S.active-mc == "" && s.id == S.active-id; clicked => { S.server-select(s.id); } }
+                Rectangle { height: 10px; }
+                HorizontalLayout {
+                    Label { text: "MINECRAFT"; vertical-alignment: center; }
+                    Rectangle {
+                        width: 22px;
+                        height: 22px;
+                        horizontal-stretch: 0;
+                        border-radius: 6px;
+                        border-width: 1px;
+                        border-color: Theme.line-hi;
+                        Text { text: "+"; color: Theme.mut; }
+                        TouchArea { mouse-cursor: pointer; clicked => { S.mf-new(); } }
+                    }
+                }
+                for m in S.mcs: SideRow { item: m; active: m.id == S.active-mc; clicked => { S.mc-select(m.id); } }
+            }
+        }
+        if S.up-available: Rectangle {
+            height: 32px;
+            border-radius: 9px;
+            background: #3ddc8422;
+            border-width: 1px;
+            border-color: Theme.good;
+            Text { text: "Update " + S.up-latest + " verfügbar"; color: Theme.good; font-size: 12.5px; font-weight: 700; }
+            TouchArea { mouse-cursor: pointer; clicked => { S.up-open = true; } }
+        }
+        SideButton { text: "Claude-Zugriff"; icon: Icons.sparkle; state: S.cl-side; clicked => { S.cl-open = true; } }
+        SideButton { text: "Discord-Status"; icon: Icons.chat; state: S.dc-side; clicked => { S.dc-open = true; } }
+        SideButton { text: "Server hinzufügen"; icon: Icons.plus; clicked => { S.add-step = 0; S.add-error = ""; S.add-key = ""; S.add-open = true; } }
+        Text { text: S.foot; color: Theme.dim; font-size: 12px; }
+        HorizontalLayout {
+            spacing: 10px;
+            for l[i] in [{ t: "Datenschutz", k: "datenschutz" }, { t: "Nutzung", k: "nutzung" }, { t: "Version " + S.version, k: "update" }]: Text {
+                text: l.t;
+                color: ta.has-hover ? Theme.fg : Theme.dim;
+                font-size: 11px;
+                ta := TouchArea { mouse-cursor: pointer; clicked => { if (l.k == "update") { S.up-check(); } else { S.open-legal(l.k); } } }
+            }
+        }
+    }
+}
+
+// Halbtransparenter Hintergrund für Dialoge
+component Overlay inherits Rectangle {
+    in property <length> box-width: 560px;
+    in property <length> box-height: 0px;
+    in property <string> title;
+    in property <bool> closable: true;
+    callback close();
+    background: #04050899;
+    TouchArea { }
+    Rectangle {
+        width: min(box-width, parent.width - 32px);
+        height: box-height > 0 ? min(box-height, parent.height - 32px) : lay.preferred-height;
+        border-radius: 16px;
+        background: Theme.panel;
+        border-width: 1px;
+        border-color: Theme.line-hi;
+        lay := VerticalLayout {
+            padding: 20px;
+            spacing: 12px;
+            HorizontalLayout {
+                Text { text: title; color: Theme.fg; font-size: 18px; font-weight: 700; vertical-alignment: center; }
+                if closable: IconButton { icon: Icons.x; clicked => { root.close(); } }
+            }
+            @children
+        }
+    }
+}
+
+component Hint inherits Text {
+    color: Theme.mut;
+    font-size: 12.5px;
+    wrap: word-wrap;
+}
+
+component ErrorBox inherits Rectangle {
+    in property <string> text;
+    background: #ff6b6b22;
+    border-radius: 9px;
+    height: t.preferred-height + 16px;
+    t := Text { x: 10px; width: parent.width - 20px; text: root.text; color: Theme.bad; font-size: 13px; wrap: word-wrap; }
+}
+
+component AddDialog inherits Overlay {
+    title: "Server hinzufügen";
+    close => { S.add-open = false; }
+    if S.add-step == 0: VerticalLayout {
+        spacing: 12px;
+        Segmented { options: ["24fire Kundenkonto", "FireAPI (Reseller)"]; current <=> S.add-provider; }
+        Field { text <=> S.add-key; password: true; mono: true; placeholder: "API-Token ({id}|cra_…)"; accepted => { S.add-probe(); } }
+        if S.add-provider == 1: Segmented { options: ["Live", "Sandbox"]; current <=> S.add-env; }
+        Hint { text: S.add-provider == 0 ? "Token erstellen: cp.24fire.de → Kontoeinstellungen → API-Keys. Er wird nur einmal angezeigt." : "Nur für Reseller mit FireAPI-Zugang."; }
+        if S.add-error != "": ErrorBox { text: S.add-error; }
+        HorizontalLayout {
+            alignment: end;
+            Button { text: "Verbinden"; kind: "primary"; busy: S.add-busy; clicked => { S.add-probe(); } }
+        }
+    }
+    if S.add-step == 1: VerticalLayout {
+        spacing: 10px;
+        Hint { text: S.add-info; }
+        for f[i] in S.found: Rectangle {
+            height: 52px;
+            border-radius: 10px;
+            background: Theme.bg-2;
+            border-width: 1px;
+            border-color: f.checked ? Theme.acc : Theme.line;
+            HorizontalLayout {
+                padding: 10px;
+                VerticalLayout {
+                    alignment: center;
+                    Text { text: f.name; color: Theme.fg; font-weight: 700; }
+                    Text { text: f.spec; color: Theme.mut; font-size: 12px; }
+                }
+            }
+            TouchArea { mouse-cursor: pointer; clicked => { S.found[i].checked = !f.checked; } }
+        }
+        Field { text <=> S.add-manual; mono: true; placeholder: "Server-ID manuell (optional)"; }
+        if S.add-error != "": ErrorBox { text: S.add-error; }
+        HorizontalLayout {
+            alignment: end;
+            spacing: 8px;
+            Button { text: "Zurück"; clicked => { S.add-step = 0; } }
+            Button { text: "Hinzufügen"; kind: "primary"; clicked => { S.add-confirm(); } }
+        }
+    }
+}
+
+component NewSiteDialog inherits Overlay {
+    title: "Neue Nginx-Site";
+    close => { S.ns-open = false; }
+    VerticalLayout {
+        spacing: 10px;
+        Field { text <=> S.ns-domains; mono: true; placeholder: "example.de www.example.de"; }
+        Segmented { options: ["Reverse Proxy", "Statisch", "PHP"]; current <=> S.ns-type; }
+        if S.ns-type == 0: Field { text <=> S.ns-upstream; mono: true; }
+        if S.ns-type != 0: Field { text <=> S.ns-root; mono: true; placeholder: "/var/www/example.de"; }
+        if S.ns-type == 0: Check { text: "WebSocket-Unterstützung"; checked <=> S.ns-ws; }
+        Check { text: "Direkt aktivieren und Nginx neu laden"; checked <=> S.ns-enable; }
+        Hint { text: "Vor dem Neuladen prüft nginx -t die Konfiguration; bei Fehlern wird die Site wieder deaktiviert."; }
+        if S.ns-error != "": ErrorBox { text: S.ns-error; }
+        HorizontalLayout { alignment: end; Button { text: "Anlegen"; kind: "primary"; clicked => { S.ngx-create(); } } }
+    }
+}
+
+component EditorDialog inherits Overlay {
+    title: S.ed-path;
+    box-width: 1200px;
+    box-height: 9000px;
+    close => { S.ed-close(); }
+    TextEdit { text <=> S.ed-text; font-size: 13px; vertical-stretch: 1; }
+    if S.ed-msg != "": Text { text: S.ed-msg; color: S.ed-msg-ok ? Theme.good : Theme.bad; font-family: Theme.mono; font-size: 12px; wrap: word-wrap; }
+    HorizontalLayout {
+        spacing: 8px;
+        alignment: end;
+        if S.ed-revert: Button { text: "Änderung zurücknehmen"; clicked => { S.ed-undo(); } }
+        Button { text: S.ed-nginx ? "Speichern & testen" : "Speichern"; kind: "primary"; clicked => { S.ed-save(); } }
+    }
+}
+
+component McDialog inherits Overlay {
+    title: S.mf-edit ? "Minecraft-Server bearbeiten" : "Minecraft-Server hinzufügen";
+    close => { S.mf-open = false; }
+    VerticalLayout {
+        spacing: 10px;
+        Field { text <=> S.mf-name; placeholder: "Name, z. B. NNN Survival"; }
+        Segmented { options: ["Über SSH-Tunnel (empfohlen)", "Direkt"]; current <=> S.mf-via; }
+        if S.mf-via == 0: ComboBox { model: S.mf-servers; current-index <=> S.mf-server; }
+        if S.mf-via == 1: Field { text <=> S.mf-host; mono: true; placeholder: "IP oder Domain"; }
+        HorizontalLayout {
+            spacing: 8px;
+            Field { text <=> S.mf-game; mono: true; placeholder: "Spiel-Port"; }
+            Field { text <=> S.mf-rcon; mono: true; placeholder: "RCON-Port"; }
+        }
+        Field { text <=> S.mf-pass; password: true; mono: true; placeholder: S.mf-edit ? "RCON-Passwort (leer = unverändert)" : "RCON-Passwort"; }
+        Hint { text: S.mf-via == 0 ? "RCON läuft durch SSH zum Server und muss nicht offen im Internet stehen." : "RCON ist unverschlüsselt; nach Möglichkeit den SSH-Tunnel nutzen."; }
+        if S.mf-test != "": Text { text: S.mf-test; color: Theme.fg; font-size: 13px; wrap: word-wrap; }
+        if S.mf-error != "": ErrorBox { text: S.mf-error; }
+        HorizontalLayout {
+            spacing: 8px;
+            Button { text: "Verbindung testen"; clicked => { S.mf-try(); } }
+            Rectangle { horizontal-stretch: 1; }
+            Button { text: "Speichern"; kind: "primary"; clicked => { S.mf-save(); } }
+        }
+    }
+}
+
+component McView inherits VerticalLayout {
+    HorizontalLayout {
+        padding-left: 24px;
+        padding-right: 24px;
+        padding-top: 18px;
+        padding-bottom: 12px;
+        spacing: 8px;
+        VerticalLayout {
+            spacing: 3px;
+            alignment: center;
+            horizontal-stretch: 1;
+            HorizontalLayout {
+                spacing: 10px;
+                alignment: start;
+                Text { text: S.mc-name; color: Theme.fg; font-size: 21px; font-weight: 700; }
+                VerticalLayout { alignment: center; Tag { text: S.mc-pill; kind: S.mc-pill-kind; } }
+            }
+            Text { text: S.mc-motd; color: Theme.acc-hi; font-family: Theme.mono; font-size: 13px; overflow: elide; }
+            Text { text: S.mc-meta; color: Theme.mut; font-family: Theme.mono; font-size: 12px; overflow: elide; }
+        }
+        Button { text: "Speichern"; clicked => { S.mc-cmd("save-all"); } }
+        Button { text: "Stoppen"; kind: "danger"; clicked => { S.mc-stop(); } }
+        Button { text: "Bearbeiten"; clicked => { S.mc-edit(); } }
+        Button { icon: Icons.trash; kind: "danger"; clicked => { S.mc-remove(); } }
+    }
+    HorizontalLayout {
+        padding-left: 24px;
+        padding-bottom: 10px;
+        spacing: 4px;
+        alignment: start;
+        for t[i] in ["Konsole", "Spieler", "Steuerung"]: Rectangle {
+            height: 34px;
+            width: lb.preferred-width + 26px;
+            border-radius: 8px;
+            background: i == S.mc-tab ? Theme.panel-3 : ta.has-hover ? Theme.panel-2 : transparent;
+            lb := Text { text: t; color: i == S.mc-tab ? Theme.fg : Theme.mut; font-size: 13px; font-weight: 600; }
+            ta := TouchArea { mouse-cursor: pointer; clicked => { S.mc-tab = i; S.mc-tab-changed(i); } }
+        }
+    }
+    Rectangle { height: 1px; background: Theme.line; }
+    Rectangle {
+        vertical-stretch: 1;
+        VerticalLayout {
+            padding: 18px;
+            spacing: 10px;
+            if S.mc-tab == 0: HorizontalLayout {
+                spacing: 6px;
+                alignment: start;
+                for c in ["list", "save-all", "time set day", "weather clear", "whitelist list", "banlist players", "tps", "help"]: Button { text: c; small: true; clicked => { S.mc-cmd(c); } }
+            }
+            if S.mc-tab == 0: LineLog { lines: S.mc-lines; vertical-stretch: 1; }
+            if S.mc-tab == 0: Field { text <=> S.mc-input; mono: true; placeholder: "Befehl ohne /, z. B. say Hallo"; accepted => { S.mc-send(); } }
+            if S.mc-tab == 1: ScrollView {
+                VerticalLayout {
+                    spacing: 12px;
+                    alignment: start;
+                    HorizontalLayout {
+                        Label { text: S.mc-online; vertical-alignment: center; horizontal-stretch: 1; }
+                        Button { text: "Aktualisieren"; small: true; clicked => { S.mc-load(); } }
+                    }
+                    for p in S.mc-players: Rectangle {
+                        height: 44px;
+                        border-radius: 9px;
+                        background: Theme.bg-2;
+                        HorizontalLayout {
+                            padding: 6px;
+                            padding-left: 12px;
+                            spacing: 6px;
+                            Text { text: p; color: Theme.fg; font-weight: 700; vertical-alignment: center; horizontal-stretch: 1; }
+                            for a in [{ t: "OP", k: "op" }, { t: "DeOP", k: "deop" }, { t: "Überleben", k: "survival" }, { t: "Kreativ", k: "creative" }, { t: "Zuschauer", k: "spectator" }, { t: "Kicken", k: "kick" }, { t: "Bannen", k: "ban" }]: Button { text: a.t; small: true; kind: a.k == "ban" ? "danger" : "ghost"; clicked => { S.mc-player(a.k, p); } }
+                        }
+                    }
+                    Label { text: "WHITELIST"; }
+                    HorizontalLayout {
+                        spacing: 8px;
+                        Field { text <=> S.mc-wl-name; placeholder: "Spielername"; horizontal-stretch: 1; }
+                        Button { text: "Hinzufügen"; clicked => { S.mc-player("whitelist-add", S.mc-wl-name); } }
+                        Button { text: "An"; clicked => { S.mc-cmd("whitelist on"); } }
+                        Button { text: "Aus"; clicked => { S.mc-cmd("whitelist off"); } }
+                    }
+                    for n in S.mc-whitelist: HorizontalLayout {
+                        Text { text: n; color: Theme.fg; vertical-alignment: center; horizontal-stretch: 1; }
+                        Button { text: "Entfernen"; small: true; clicked => { S.mc-player("whitelist-remove", n); } }
+                    }
+                    Label { text: "GEBANNT"; }
+                    HorizontalLayout {
+                        spacing: 8px;
+                        Field { text <=> S.mc-ban-name; placeholder: "Spielername"; horizontal-stretch: 1; }
+                        Button { text: "Bannen"; kind: "danger"; clicked => { S.mc-player("ban", S.mc-ban-name); } }
+                    }
+                    for n in S.mc-banned: HorizontalLayout {
+                        Text { text: n; color: Theme.fg; vertical-alignment: center; horizontal-stretch: 1; }
+                        Button { text: "Entbannen"; small: true; clicked => { S.mc-player("pardon", n); } }
+                    }
+                }
+            }
+            if S.mc-tab == 2: ScrollView {
+                VerticalLayout {
+                    spacing: 10px;
+                    alignment: start;
+                    Label { text: "NACHRICHT AN ALLE"; }
+                    HorizontalLayout {
+                        spacing: 8px;
+                        Field { text <=> S.mc-say; placeholder: "Nachricht"; horizontal-stretch: 1; accepted => { S.mc-player("say", S.mc-say); } }
+                        Button { text: "Senden"; kind: "primary"; clicked => { S.mc-player("say", S.mc-say); } }
+                    }
+                    Label { text: "ZEIT · WETTER · SCHWIERIGKEIT"; }
+                    HorizontalLayout {
+                        spacing: 6px;
+                        alignment: start;
+                        for c in [{ t: "Tag", k: "time set day" }, { t: "Nacht", k: "time set night" }, { t: "Klar", k: "weather clear" }, { t: "Regen", k: "weather rain" }, { t: "Gewitter", k: "weather thunder" }, { t: "Friedlich", k: "difficulty peaceful" }, { t: "Normal", k: "difficulty normal" }, { t: "Schwer", k: "difficulty hard" }]: Button { text: c.t; small: true; clicked => { S.mc-cmd(c.k); } }
+                    }
+                    HorizontalLayout {
+                        Label { text: "SPIELREGELN"; vertical-alignment: center; horizontal-stretch: 1; }
+                        Button { text: "Aktualisieren"; small: true; clicked => { S.mc-load(); } }
+                    }
+                    for r in S.mc-rules: HorizontalLayout {
+                        height: 34px;
+                        Text { text: r.label; color: Theme.fg; vertical-alignment: center; horizontal-stretch: 1; }
+                        VerticalLayout { alignment: center; Toggle { on: r.on; toggled(v) => { S.mc-rule(r.key, v); } } }
+                    }
+                }
+            }
+        }
+    }
+}
+
+component ClaudeDialog inherits Overlay {
+    title: "Claude-Zugriff";
+    box-width: 760px;
+    close => { S.cl-open = false; }
+    HorizontalLayout {
+        spacing: 10px;
+        Tag { text: S.cl-status; kind: S.cl-status-kind; }
+        Rectangle { }
+        Toggle { on: S.cl-enabled; toggled(v) => { S.cl-set-enabled(v); } }
+    }
+    Hint { text: "Gib Claude Code und anderen KI-Agenten per MCP Zugriff auf deine Server. Läuft nur auf 127.0.0.1; Server-Passwörter bekommt Claude nie zu sehen."; }
+    HorizontalLayout {
+        spacing: 8px;
+        Text { text: S.cl-url; color: Theme.fg; font-family: Theme.mono; font-size: 13px; vertical-alignment: center; horizontal-stretch: 1; }
+        Button { text: "URL kopieren"; small: true; clicked => { S.cl-copy("url"); } }
+        Button { text: "Token kopieren"; small: true; clicked => { S.cl-copy("token"); } }
+        Button { text: "Neues Token"; small: true; kind: "danger"; clicked => { S.cl-regen(); } }
+    }
+    HorizontalLayout {
+        spacing: 8px;
+        Field { text <=> S.cl-port; mono: true; width: 110px; placeholder: "Port"; accepted => { S.cl-set-port(self.text); } }
+        Button { text: "In Claude Code eintragen"; kind: "primary"; clicked => { S.cl-register(); } }
+        Button { text: "Protokoll"; clicked => { S.au-load(); S.au-open = true; } }
+    }
+    if S.cl-msg != "": Hint { text: S.cl-msg; }
+    HorizontalLayout { spacing: 10px; Text { text: "Riskante Aktionen hier in der App bestätigen (empfohlen)"; color: Theme.fg; vertical-alignment: center; } Toggle { on: S.cl-confirm; toggled(v) => { S.cl-set-confirm(v); } } }
+    Label { text: "ZUGRIFF PRO SERVER"; }
+    for a in S.cl-access: HorizontalLayout {
+        spacing: 10px;
+        Text { text: a.name; color: Theme.fg; font-weight: 600; vertical-alignment: center; horizontal-stretch: 1; }
+        Segmented { options: ["Kein", "Lesen", "Steuern", "Voll (SSH)"]; current: a.level; changed(i) => { S.cl-level(a.id, i); } }
+    }
+}
+
+component AuditDialog inherits Overlay {
+    title: "Claude-Protokoll";
+    box-width: 1100px;
+    box-height: 9000px;
+    close => { S.au-open = false; }
+    HorizontalLayout {
+        spacing: 8px;
+        Field { text <=> S.au-search; placeholder: "Suchen (Befehl, Pfad, Ausgabe …)"; horizontal-stretch: 1; edited(t) => { S.au-load(); } }
+        Button { text: S.au-changes ? "Alle zeigen" : "Nur Änderungen"; clicked => { S.au-changes = !S.au-changes; S.au-load(); } }
+        Button { text: "Exportieren"; clicked => { S.au-export(); } }
+        Button { text: "Leeren"; kind: "danger"; clicked => { S.au-clear(); } }
+    }
+    Text { text: S.au-stats; color: Theme.mut; font-size: 12px; }
+    ScrollView {
+        vertical-stretch: 1;
+        VerticalLayout {
+            spacing: 6px;
+            alignment: start;
+            for e[i] in S.audit: Rectangle {
+                background: Theme.bg-2;
+                border-radius: 9px;
+                border-width: 1px;
+                border-color: e.change ? #d97757 : Theme.line;
+                height: col.preferred-height;
+                col := VerticalLayout {
+                    padding: 9px;
+                    spacing: 6px;
+                    HorizontalLayout {
+                        spacing: 10px;
+                        Text { text: e.time; width: 130px; color: Theme.dim; font-family: Theme.mono; font-size: 12px; }
+                        Tag { text: e.result; kind: e.kind; }
+                        Text { text: e.tool; color: Theme.fg; font-weight: 700; font-size: 13px; }
+                        Text { text: e.server; color: Theme.mut; font-size: 13px; }
+                        Text { text: e.summary; color: #ffc98a; font-family: Theme.mono; font-size: 12px; overflow: elide; horizontal-stretch: 1; }
+                    }
+                    if e.open: Text { text: e.details; color: #c7cfe0; font-family: Theme.mono; font-size: 12px; wrap: word-wrap; }
+                }
+                TouchArea { mouse-cursor: pointer; clicked => { S.au-toggle(i); } }
+            }
+        }
+    }
+}
+
+component AskDialog inherits Overlay {
+    title: "Claude möchte eine Aktion ausführen";
+    closable: false;
+    box-width: 620px;
+    Text { text: "Server: " + S.ask-server; color: Theme.mut; font-family: Theme.mono; font-size: 12px; }
+    Text { text: S.ask-summary; color: Theme.fg; font-size: 16px; font-weight: 700; wrap: word-wrap; }
+    if S.ask-details != "": ScrollView {
+        height: 200px;
+        Text { text: S.ask-details; width: parent.width - 16px; color: #ffc98a; font-family: Theme.mono; font-size: 12px; wrap: word-wrap; }
+    }
+    Hint { text: "Wird nach 2 Minuten automatisch abgelehnt."; }
+    HorizontalLayout {
+        alignment: end;
+        spacing: 8px;
+        Button { text: "Ablehnen"; clicked => { S.ask-answer(false); } }
+        Button { text: "Erlauben"; kind: "primary"; clicked => { S.ask-answer(true); } }
+    }
+}
+
+component DiscordDialog inherits Overlay {
+    title: "Discord-Status";
+    box-width: 640px;
+    close => { S.dc-save(); S.dc-open = false; }
+    HorizontalLayout {
+        Tag { text: S.dc-status; kind: S.dc-status-kind; }
+        Rectangle { }
+        Toggle { on: S.dc-enabled; toggled(v) => { S.dc-set-enabled(v); } }
+    }
+    Hint { text: "Platzhalter: {name} {status} {cpu} {ram} {ram_max} {ram_pct} {disk} {disk_max} {uptime} {traffic} {traffic_max} {cores} {os} {servers} {online}"; }
+    Field { text <=> S.dc-details; placeholder: "Zeile 1"; }
+    Field { text <=> S.dc-state; placeholder: "Zeile 2"; }
+    HorizontalLayout {
+        spacing: 8px;
+        Field { text <=> S.dc-large; mono: true; placeholder: "Bild (Asset-Name)"; }
+        Field { text <=> S.dc-large-text; placeholder: "Bild-Text"; }
+    }
+    Rectangle {
+        height: 72px;
+        background: #232428;
+        border-radius: 10px;
+        VerticalLayout {
+            padding: 12px;
+            alignment: center;
+            Text { text: S.dc-pv-details; color: #f2f3f5; font-weight: 700; }
+            Text { text: S.dc-pv-state; color: #dbdee1; }
+        }
+    }
+    HorizontalLayout {
+        alignment: end;
+        spacing: 8px;
+        Button { text: "Developer Portal"; clicked => { S.dc-portal(); } }
+        Button { text: "Speichern"; kind: "primary"; clicked => { S.dc-save(); } }
+    }
+}
+
+component UpdateDialog inherits Overlay {
+    title: "Update auf Version " + S.up-latest;
+    close => { S.up-open = false; }
+    if S.up-notes != "": ScrollView {
+        height: 220px;
+        Text { text: S.up-notes; width: parent.width - 16px; color: Theme.fg; font-size: 13px; wrap: word-wrap; }
+    }
+    if S.up-progress >= 0: ProgressBar { value: S.up-progress; }
+    if S.up-status != "": Hint { text: S.up-status; }
+    HorizontalLayout { alignment: end; Button { text: "Jetzt aktualisieren"; kind: "primary"; clicked => { S.up-install(); } } }
+}
+
+component MessageDialog inherits Overlay {
+    title: S.dlg-title;
+    box-width: 440px;
+    closable: false;
+    if S.dlg-text != "": Hint { text: S.dlg-text; }
+    if S.dlg-input: Field { text <=> S.dlg-value; password: S.dlg-secret; accepted => { S.dlg-answer(true); } }
+    HorizontalLayout {
+        alignment: end;
+        spacing: 8px;
+        Button { text: "Abbrechen"; clicked => { S.dlg-answer(false); } }
+        Button { text: S.dlg-ok; kind: S.dlg-danger ? "danger" : "primary"; clicked => { S.dlg-answer(true); } }
+    }
+}
+
+export component AppWindow inherits Window {
+    title: "Fire Desktop";
+    icon: @image-url("../assets/icon.png");
+    preferred-width: 1360px;
+    preferred-height: 860px;
+    min-width: 980px;
+    min-height: 640px;
+    background: Theme.bg;
+    default-font-family: Theme.sans;
+
+    // Feste Größe vom Fenster, damit Tabs die Fenstergröße nicht beeinflussen
+    HorizontalLayout {
+        x: 0;
+        y: 0;
+        width: root.width;
+        height: root.height;
+        Sidebar { width: 260px; }
+        Rectangle { width: 1px; background: Theme.line; }
+        if S.active-mc != "": McView { }
+        if S.active-mc == "" && S.servers.length > 0: ServerView { }
+        if S.active-mc == "" && S.servers.length == 0: VerticalLayout {
+            alignment: center;
+            spacing: 12px;
+            Text { text: "Noch kein Server verbunden"; color: Theme.fg; font-size: 22px; font-weight: 700; horizontal-alignment: center; }
+            Text { text: "Erstelle unter cp.24fire.de → Kontoeinstellungen → API-Keys einen Token und füge deinen Server hinzu."; color: Theme.mut; horizontal-alignment: center; }
+            HorizontalLayout { alignment: center; Button { text: "Server hinzufügen"; kind: "primary"; clicked => { S.add-step = 0; S.add-open = true; } } }
+        }
+    }
+
+    // Übertragungen
+    if S.transfers.length > 0: Rectangle {
+        x: 276px;
+        y: parent.height - self.height - 16px;
+        width: 420px;
+        height: col.preferred-height;
+        border-radius: 12px;
+        background: Theme.panel-2;
+        border-width: 1px;
+        border-color: Theme.line-hi;
+        col := VerticalLayout {
+            padding: 12px;
+            spacing: 10px;
+            for t in S.transfers: VerticalLayout {
+                spacing: 4px;
+                HorizontalLayout {
+                    spacing: 8px;
+                    Text { text: t.up ? "↑" : "↓"; color: t.up ? Theme.acc-hi : Theme.blue; font-weight: 700; }
+                    Text { text: t.label; color: Theme.fg; font-size: 12.5px; font-weight: 700; overflow: elide; horizontal-stretch: 1; }
+                    if t.state == "run": Text {
+                        text: "✕";
+                        color: Theme.mut;
+                        TouchArea { mouse-cursor: pointer; clicked => { S.transfer-cancel(t.id); } }
+                    }
+                }
+                ProgressBar { value: t.pct; }
+                HorizontalLayout {
+                    spacing: 8px;
+                    Text { text: t.info; color: t.state == "err" ? Theme.bad : Theme.mut; font-size: 11.5px; }
+                    Text { text: t.file; color: Theme.dim; font-size: 11.5px; overflow: elide; horizontal-alignment: center; horizontal-stretch: 1; }
+                    Text { text: t.speed; color: Theme.mut; font-size: 11.5px; }
+                }
+            }
+        }
+    }
+
+    if S.add-open: AddDialog { }
+    if S.ns-open: NewSiteDialog { }
+    if S.ed-open: EditorDialog { }
+    if S.mf-open: McDialog { }
+    if S.cl-open: ClaudeDialog { }
+    if S.au-open: AuditDialog { }
+    if S.dc-open: DiscordDialog { }
+    if S.up-open: UpdateDialog { }
+    if S.dlg-open: MessageDialog { }
+    if S.ask-open: AskDialog { }
+
+    // Hinweise
+    VerticalLayout {
+        x: parent.width - 400px;
+        y: parent.height - self.preferred-height - 16px;
+        width: 384px;
+        spacing: 8px;
+        for t in S.toasts: Rectangle {
+            height: tt.preferred-height + 20px;
+            border-radius: 9px;
+            background: Theme.panel-2;
+            border-width: 1px;
+            border-color: t.kind == "ok" ? Theme.good : t.kind == "err" ? Theme.bad : Theme.line-hi;
+            tt := Text { x: 12px; width: parent.width - 24px; text: t.text; color: Theme.fg; font-size: 13px; wrap: word-wrap; }
+        }
+    }
+}

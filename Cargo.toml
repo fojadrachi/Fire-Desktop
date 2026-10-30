@@ -1,0 +1,45 @@
+[package]
+name = "fire-desktop"
+version = "2.0.0"
+edition = "2021"
+description = "Fire Desktop – 24fire-KVM-Server verwalten"
+license = "UNLICENSED"
+publish = false
+
+[[bin]]
+name = "fire-desktop"
+path = "src/main.rs"
+
+[dependencies]
+slint = "1"
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "fs", "sync", "time", "net", "io-util"] }
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls", "stream"] }
+futures = "0.3"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+sha2 = "0.10"
+hex = "0.4"
+base64 = "0.22"
+aes-gcm = "0.10"
+chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
+anyhow = "1"
+uuid = { version = "1", features = ["v4"] }
+open = "5"
+rfd = "0.15"
+arboard = "3"
+vt100 = "0.15"
+image = { version = "0.25", default-features = false, features = ["png"] }
+russh = { version = "0.54", default-features = false, features = ["ring"] }
+russh-sftp = "2"
+windows-sys = { version = "0.59", features = ["Win32_Foundation", "Win32_Security_Cryptography", "Win32_System_Memory"] }
+
+[build-dependencies]
+slint-build = "1"
+winresource = "0.1"
+
+[profile.release]
+opt-level = 3
+lto = "thin"
+codegen-units = 1
+strip = true
+panic = "abort"
